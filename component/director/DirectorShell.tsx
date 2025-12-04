@@ -1,0 +1,477 @@
+// component/director/DirectorShell.tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import type { AttendanceRecord, Employee } from "@/lib/hr-types";
+import { parseAttendanceCsv, parseEmployeesCsv } from "@/lib/hr-sheet";
+import type {
+  DirectorSection,
+  OverviewStats,
+  WorkConfig,
+} from "@/app/director/types";
+import { DirectorLayout } from "./DirectorLayout";
+
+type WorkConfigRecord = WorkConfig & {
+  id: string;
+  shift: number; // 1,2,3...
+};
+
+
+type WorkShift = {
+  id: string; // "1"
+  label: string; // "Ca 1"
+  shift: number;
+};
+
+export type DirectorRenderProps = {
+  overviewStats: OverviewStats;
+
+  // Cấu hình giờ làm theo ca
+  workConfig: WorkConfig | null;
+  configDraft: WorkConfig;
+  setConfigDraft: (cfg: WorkConfig) => void;
+  handleSaveWorkConfig: () => void;
+  savingConfig: boolean;
+  configMessage: string | null;
+
+  // Ca làm
+  workShifts: WorkShift[];
+  activeShiftId: string;
+  setActiveShiftId: (id: string) => void;
+  workConfigs: WorkConfigRecord[];
+
+  // Nhân sự & chấm công
+  employees: Employee[];
+  attendance: AttendanceRecord[];
+  employeeTab: "all" | "fulltime" | "temporary";
+  setEmployeeTab: (tab: "all" | "fulltime" | "temporary") => void;
+  filteredEmployees: Employee[];
+};
+
+export function DirectorShell(props: {
+  activeSection: DirectorSection;
+  render: (p: DirectorRenderProps) => ReactNode;
+}) {
+  const { activeSection, render } = props;
+  const router = useRouter();
+
+  const [accountName, setAccountName] = useState<string>("");
+
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [employeeTab, setEmployeeTab] = useState<
+    "all" | "fulltime" | "temporary"
+  >("all");
+
+  // Nhiều cấu hình theo ca
+  const [workConfigs, setWorkConfigs] = useState<WorkConfigRecord[]>([]);
+  const [activeShiftId, setActiveShiftId] = useState<string>("1");
+
+  // Config đang áp dụng cho ca đang chọn
+  const [workConfig, setWorkConfig] = useState<WorkConfig | null>(null);
+  const [configDraft, setConfigDraft] = useState<WorkConfig>({
+    standardCheckIn: "08:00",
+    standardCheckOut: "17:00",
+    lateGraceMinutes: 5,
+    earlyLeaveGraceMinutes: 5,
+    overtimeThresholdMinutes: 60,
+  });
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [configMessage, setConfigMessage] = useState<string | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Auth guard
+  useEffect(() => {
+    const raw =
+      typeof window !== "undefined"
+        ? localStorage.getItem("currentAccount")
+        : null;
+
+    if (!raw) {
+      router.replace("/login");
+      return;
+    }
+
+    try {
+      const acc = JSON.parse(raw);
+      setAccountName(acc.fullName || "Giám đốc");
+    } catch {
+      setAccountName("Giám đốc");
+    }
+  }, [router]);
+
+  // Load data
+  useEffect(() => {
+    async function loadAll() {
+      try {
+        setError(null);
+
+        // Employees
+        const empUrl = process.env.NEXT_PUBLIC_EMPLOYEES_CSV_URL;
+        if (!empUrl)
+          throw new Error("Thiếu NEXT_PUBLIC_EMPLOYEES_CSV_URL trong .env");
+        const empRes = await fetch(empUrl);
+        const empCsv = await empRes.text();
+        const empList = parseEmployeesCsv(empCsv);
+        setEmployees(empList);
+
+        // Attendance
+        const attUrl = process.env.NEXT_PUBLIC_ATTENDANCE_CSV_URL;
+        if (attUrl) {
+          const attRes = await fetch(attUrl);
+          const attCsv = await attRes.text();
+          const attList = parseAttendanceCsv(attCsv);
+          setAttendance(attList);
+        }
+
+        // Work configs (nhiều ca)
+        const base =
+          process.env.NEXT_PUBLIC_MOCKAPI_BASE_URL ||
+          process.env.MOCKAPI_BASE_URL;
+        if (base) {
+          const cfgRes = await fetch(`${base}/workConfigs`);
+          if (cfgRes.ok) {
+            const rawList: unknown = await cfgRes.json();
+            if (Array.isArray(rawList)) {
+              const cfgs: WorkConfigRecord[] = rawList.map((raw) => {
+                const r = raw as Partial<WorkConfigRecord>;
+                return {
+                  id: String(r.id ?? ""),
+                  shift: Number(r.shift ?? 1),
+                  standardCheckIn: r.standardCheckIn || "08:00",
+                  standardCheckOut: r.standardCheckOut || "17:00",
+                  lateGraceMinutes: Number(r.lateGraceMinutes ?? 5),
+                  earlyLeaveGraceMinutes: Number(
+                    r.earlyLeaveGraceMinutes ?? 5
+                  ),
+                  overtimeThresholdMinutes: Number(
+                    r.overtimeThresholdMinutes ?? 60
+                  ),
+                };
+              });
+
+              setWorkConfigs(cfgs);
+
+              if (cfgs.length > 0) {
+                // default: ca có shift nhỏ nhất
+                const minShift = cfgs.reduce<number>(
+                    (min, c) => (c.shift < min ? c.shift : min),
+                    cfgs[0].shift
+                    );
+
+                const defaultShiftId = String(minShift);
+                setActiveShiftId(defaultShiftId);
+
+                const activeCfg =
+                  cfgs.find((c) => String(c.shift) === defaultShiftId) ||
+                  cfgs[0];
+                const baseCfg: WorkConfig = {
+                  standardCheckIn: activeCfg.standardCheckIn,
+                  standardCheckOut: activeCfg.standardCheckOut,
+                  lateGraceMinutes: activeCfg.lateGraceMinutes,
+                  earlyLeaveGraceMinutes: activeCfg.earlyLeaveGraceMinutes,
+                  overtimeThresholdMinutes: activeCfg.overtimeThresholdMinutes,
+                };
+                setWorkConfig(baseCfg);
+                setConfigDraft(baseCfg);
+              }
+            }
+          }
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Không tải được dữ liệu";
+        console.error(err);
+        setError(message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadAll();
+  }, []);
+
+  // Khi đổi ca → sync workConfig + draft
+  useEffect(() => {
+    if (!workConfigs.length) return;
+    const found = workConfigs.find(
+      (c) => String(c.shift) === activeShiftId
+    );
+    if (!found) return;
+
+    const cfg: WorkConfig = {
+      standardCheckIn: found.standardCheckIn,
+      standardCheckOut: found.standardCheckOut,
+      lateGraceMinutes: found.lateGraceMinutes,
+      earlyLeaveGraceMinutes: found.earlyLeaveGraceMinutes,
+      overtimeThresholdMinutes: found.overtimeThresholdMinutes,
+    };
+    setWorkConfig(cfg);
+    setConfigDraft(cfg);
+  }, [activeShiftId, workConfigs]);
+
+  const workShifts: WorkShift[] = useMemo(
+    () =>
+      workConfigs.map((cfg) => ({
+        id: String(cfg.shift),
+        label: `Ca ${cfg.shift}`,
+        shift: cfg.shift,
+      })),
+    [workConfigs]
+  );
+
+  const overviewStats: OverviewStats = useMemo(() => {
+    const active = employees.filter((e) => e.workStatus === "ACTIVE");
+
+    let currentDate: string | null = null;
+    if (attendance.length) {
+      currentDate = attendance.reduce(
+        (max, r) => (max === null || r.date > max ? r.date : max),
+        null as string | null
+      );
+    }
+
+    const recordsByCode = new Map<string, AttendanceRecord>();
+    if (currentDate) {
+      attendance.forEach((r) => {
+        if (r.date === currentDate) recordsByCode.set(r.employeeCode, r);
+      });
+    }
+
+    const stdIn = timeToMinutes(workConfig?.standardCheckIn);
+    const lateGrace = workConfig?.lateGraceMinutes ?? 0;
+
+    function classify(e: Employee): "present" | "late" | "absent" {
+      const rec = recordsByCode.get(e.code);
+      if (!rec) return "absent";
+      const checkInM = timeToMinutes(rec.checkIn);
+      if (checkInM == null || stdIn == null) return "present";
+      if (checkInM > stdIn + lateGrace) return "late";
+      return "present";
+    }
+
+    let workingTotal = 0,
+      workingFullTime = 0,
+      workingTemp = 0;
+    let lateTotal = 0,
+      lateFullTime = 0,
+      lateTemp = 0;
+    let ftPresent = 0,
+      ftLate = 0,
+      ftAbsent = 0;
+    let tpPresent = 0,
+      tpLate = 0,
+      tpAbsent = 0;
+
+    active.forEach((e) => {
+      const status = classify(e);
+      const isFT = e.employmentType === "FULL_TIME";
+
+      const isWorking = status === "present" || status === "late";
+      if (isWorking) {
+        workingTotal++;
+        if (isFT) workingFullTime++;
+        else workingTemp++;
+      }
+
+      if (status === "late") {
+        lateTotal++;
+        if (isFT) lateFullTime++;
+        else lateTemp++;
+      }
+
+      if (isFT) {
+        if (status === "present") ftPresent++;
+        else if (status === "late") ftLate++;
+        else ftAbsent++;
+      } else {
+        if (status === "present") tpPresent++;
+        else if (status === "late") tpLate++;
+        else tpAbsent++;
+      }
+    });
+
+    return {
+      totalEmployees: employees.length,
+      totalFullTime: employees.filter(
+        (e) => e.employmentType === "FULL_TIME"
+      ).length,
+      totalTemp: employees.filter(
+        (e) => e.employmentType === "TEMPORARY"
+      ).length,
+      workingTotal,
+      workingFullTime,
+      workingTemp,
+      lateTotal,
+      lateFullTime,
+      lateTemp,
+      fullTimePresent: ftPresent,
+      fullTimeLate: ftLate,
+      fullTimeAbsent: ftAbsent,
+      tempPresent: tpPresent,
+      tempLate: tpLate,
+      tempAbsent: tpAbsent,
+      currentDateLabel: currentDate ? formatVNDate(currentDate) : null,
+    };
+  }, [attendance, employees, workConfig]);
+
+  const filteredEmployees = useMemo(() => {
+    return employees.filter((e) => {
+      if (employeeTab === "fulltime") return e.employmentType === "FULL_TIME";
+      if (employeeTab === "temporary") return e.employmentType === "TEMPORARY";
+      return true;
+    });
+  }, [employees, employeeTab]);
+
+  async function handleSaveWorkConfig() {
+    setConfigMessage(null);
+    const base =
+      process.env.NEXT_PUBLIC_MOCKAPI_BASE_URL ||
+      process.env.MOCKAPI_BASE_URL;
+    if (!base) {
+      setConfigMessage("Thiếu NEXT_PUBLIC_MOCKAPI_BASE_URL trong .env");
+      return;
+    }
+
+    const target = workConfigs.find(
+      (c) => String(c.shift) === activeShiftId
+    );
+    if (!target) {
+      setConfigMessage("Không tìm thấy cấu hình cho ca đang chọn.");
+      return;
+    }
+
+    try {
+      setSavingConfig(true);
+
+      const payload = {
+        shift: target.shift,
+        standardCheckIn: configDraft.standardCheckIn,
+        standardCheckOut: configDraft.standardCheckOut,
+        lateGraceMinutes: configDraft.lateGraceMinutes,
+        earlyLeaveGraceMinutes: configDraft.earlyLeaveGraceMinutes,
+        overtimeThresholdMinutes: configDraft.overtimeThresholdMinutes,
+      };
+
+      const res = await fetch(`${base}/workConfigs/${target.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("Lưu cấu hình thất bại");
+
+      const updatedRaw = await res.json();
+      const updated: WorkConfigRecord = {
+        id: String(updatedRaw.id ?? target.id),
+        shift: Number(updatedRaw.shift ?? target.shift),
+        standardCheckIn:
+          updatedRaw.standardCheckIn ?? payload.standardCheckIn,
+        standardCheckOut:
+          updatedRaw.standardCheckOut ?? payload.standardCheckOut,
+        lateGraceMinutes: Number(
+          updatedRaw.lateGraceMinutes ?? payload.lateGraceMinutes
+        ),
+        earlyLeaveGraceMinutes: Number(
+          updatedRaw.earlyLeaveGraceMinutes ??
+            payload.earlyLeaveGraceMinutes
+        ),
+        overtimeThresholdMinutes: Number(
+          updatedRaw.overtimeThresholdMinutes ??
+            payload.overtimeThresholdMinutes
+        ),
+      };
+
+      setWorkConfigs((prev) =>
+        prev.map((c) => (c.id === target.id ? updated : c))
+      );
+
+      const cfg: WorkConfig = {
+        standardCheckIn: updated.standardCheckIn,
+        standardCheckOut: updated.standardCheckOut,
+        lateGraceMinutes: updated.lateGraceMinutes,
+        earlyLeaveGraceMinutes: updated.earlyLeaveGraceMinutes,
+        overtimeThresholdMinutes: updated.overtimeThresholdMinutes,
+      };
+      setWorkConfig(cfg);
+      setConfigDraft(cfg);
+
+      setConfigMessage(`Đã lưu cấu hình cho ca ${updated.shift}.`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Không thể lưu cấu hình";
+      setConfigMessage(message);
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  const handleNavigate = (s: DirectorSection) => {
+    const path =
+      s === "overview"
+        ? "/director/dashboard"
+        : s === "employees"
+        ? "/director/employees"
+        : s === "attendance"
+        ? "/director/attendance"
+        : "/director/shifts";
+    router.push(path);
+  };
+
+  function handleLogout() {
+    localStorage.removeItem("currentAccount");
+    router.replace("/login");
+  }
+
+  return (
+    <DirectorLayout
+      accountName={accountName}
+      section={activeSection}
+      onNavigate={handleNavigate}
+      onLogout={handleLogout}
+    >
+      {loading && <div>Đang tải dữ liệu...</div>}
+      {error && (
+        <div className="text-red-600 bg-red-50 border border-red-100 p-2 rounded text-sm">
+          {error}
+        </div>
+      )}
+
+      {!loading &&
+        !error &&
+        render({
+          overviewStats,
+          workConfig,
+          configDraft,
+          setConfigDraft,
+          handleSaveWorkConfig,
+          savingConfig,
+          configMessage,
+          workShifts,
+          activeShiftId,
+          setActiveShiftId,
+          workConfigs,
+          employees,
+          attendance,
+          employeeTab,
+          setEmployeeTab,
+          filteredEmployees,
+        })}
+    </DirectorLayout>
+  );
+}
+
+// helpers
+function timeToMinutes(time?: string | null): number | null {
+  if (!time) return null;
+  const [hh, mm] = time.split(":").map((v) => parseInt(v, 10));
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+  return hh * 60 + mm;
+}
+
+function formatVNDate(iso?: string | null): string {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}

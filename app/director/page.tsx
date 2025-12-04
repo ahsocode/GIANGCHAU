@@ -1,15 +1,11 @@
-// app/page.tsx
 "use client";
-
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-export default function Home() {
+export default function DirectorIndexPage() {
   const router = useRouter();
-
   useEffect(() => {
-    router.replace("/login");
+    router.replace("/director/dashboard");
   }, [router]);
-
   return null;
 }

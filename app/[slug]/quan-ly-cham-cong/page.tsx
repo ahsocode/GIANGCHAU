@@ -2,18 +2,18 @@
 
 import { useMemo, useState } from "react";
 import type { AttendanceRecord, Employee } from "@/lib/hr-types";
-import { DirectorShell } from "@/component/director/DirectorShell";
-import type { WorkConfig } from "../types";
+import { AppShell } from "@/component/layout/AppShell";
+import type { WorkConfig } from "@/app/types";
 
-type AttendanceProps = {
+interface Props {
   employees: Employee[];
   attendance: AttendanceRecord[];
   workConfig: WorkConfig | null;
-};
+}
 
-export default function DirectorAttendancePage() {
+export default function AttendancePage() {
   return (
-    <DirectorShell
+    <AppShell
       activeSection="attendance"
       render={({ employees, attendance, workConfig }) => (
         <AttendanceSection
@@ -26,7 +26,7 @@ export default function DirectorAttendancePage() {
   );
 }
 
-function AttendanceSection({ employees, attendance, workConfig }: AttendanceProps) {
+function AttendanceSection({ employees, attendance, workConfig }: Props) {
   const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const latestDate = useMemo(
     () =>
@@ -38,6 +38,13 @@ function AttendanceSection({ employees, attendance, workConfig }: AttendanceProp
   );
 
   const [selectedDate, setSelectedDate] = useState<string | null>(todayIso);
+  const attendableEmployees = useMemo(
+    () =>
+      employees.filter(
+        (e) => e.roleKey !== "DIRECTOR" && e.roleKey !== "ADMIN"
+      ),
+    [employees]
+  );
 
   const attMap = useMemo(() => {
     const m = new Map<string, AttendanceRecord>();
@@ -78,7 +85,7 @@ function AttendanceSection({ employees, attendance, workConfig }: AttendanceProp
     const earlyGrace = workConfig?.earlyLeaveGraceMinutes ?? 0;
     const otThreshold = workConfig?.overtimeThresholdMinutes ?? 60;
 
-    employees.forEach((e) => {
+    attendableEmployees.forEach((e) => {
       const rec = attMap.get(e.code);
       if (!rec) {
         missing++;
@@ -100,7 +107,7 @@ function AttendanceSection({ employees, attendance, workConfig }: AttendanceProp
       }
     });
     return { checkedIn, missing, noCheckIn, late, earlyLeave, overtime };
-  }, [attMap, employees, selectedDate, workConfig]);
+  }, [attMap, attendableEmployees, selectedDate, workConfig]);
 
   return (
     <div className="space-y-4">
@@ -111,7 +118,7 @@ function AttendanceSection({ employees, attendance, workConfig }: AttendanceProp
               Quản lý chấm công
             </h2>
             <p className="text-xs text-slate-500">
-              Dữ liệu lấy trực tiếp từ Google Sheet chấm công.
+              Dữ liệu lấy trực tiếp từ Supabase.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs">
@@ -134,13 +141,13 @@ function AttendanceSection({ employees, attendance, workConfig }: AttendanceProp
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
           <AttendanceStat label="Tổng bản ghi" value={attendance.length} />
           <AttendanceStat label="Bản ghi ngày chọn" value={countInSelected} />
-          <AttendanceStat label="Số nhân viên" value={employees.length} />
+          <AttendanceStat label="Số nhân viên" value={attendableEmployees.length} />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
           <ChartCard
             title="Tình trạng chấm công"
-            total={employees.length}
+            total={attendableEmployees.length}
             segments={[
               { label: "Đã check-in", value: summary.checkedIn, color: "#22c55e" },
               { label: "Thiếu check-in", value: summary.noCheckIn, color: "#f97316" },
@@ -179,7 +186,7 @@ function AttendanceSection({ employees, attendance, workConfig }: AttendanceProp
               </tr>
             </thead>
             <tbody>
-              {employees.length === 0 && (
+              {attendableEmployees.length === 0 && (
                 <tr>
                   <td
                     colSpan={7}
@@ -190,7 +197,7 @@ function AttendanceSection({ employees, attendance, workConfig }: AttendanceProp
                 </tr>
               )}
 
-              {employees.map((e) => {
+              {attendableEmployees.map((e) => {
                 const rec = selectedDate ? attMap.get(e.code) : undefined;
                 const checkIn = rec?.checkIn || "-";
                 const checkOut = rec?.checkOut || "-";
@@ -241,11 +248,19 @@ function AttendanceSection({ employees, attendance, workConfig }: AttendanceProp
   );
 }
 
-function AttendanceStat({ label, value }: { label: string; value: number }) {
+function timeToMinutes(time?: string | null): number | null {
+  if (!time) return null;
+  const [hh, mm] = time.split(":").map((v) => parseInt(v, 10));
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+  return hh * 60 + mm;
+}
+
+function AttendanceStat(props: { label: string; value: number }) {
+  const { label, value } = props;
   return (
-    <div className="border border-slate-100 rounded-lg p-3 bg-slate-50">
-      <div className="text-slate-500">{label}</div>
-      <div className="text-lg font-semibold text-slate-900 mt-1">{value}</div>
+    <div className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="text-xl font-semibold text-slate-900 mt-1">{value}</div>
     </div>
   );
 }
@@ -259,62 +274,24 @@ function ChartCard({
   total: number;
   segments: { label: string; value: number; color: string }[];
 }) {
-  const safeTotal = total > 0 ? total : 1;
-  const totalSegments = segments.reduce((s, v) => s + v.value, 0);
-
-  const gradient = segments
-    .reduce<{ from: number; to: number; color: string; acc: number }[]>(
-      (arr, s) => {
-        const prev = arr.length ? arr[arr.length - 1].to : 0;
-        const to = prev + (s.value / safeTotal) * 360;
-        arr.push({ from: prev, to, color: s.color, acc: to });
-        return arr;
-      },
-      []
-    )
-    .map((seg) => `${seg.color} ${seg.from.toFixed(2)}deg ${seg.to.toFixed(2)}deg`)
-    .join(", ");
-
   return (
-    <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 flex items-center gap-4">
-      <div className="relative h-24 w-24">
-        <div
-          className="absolute inset-0 rounded-full"
-          style={{ background: `conic-gradient(${gradient})` }}
-        />
-        <div className="absolute inset-3 rounded-full bg-white flex items-center justify-center">
-          <div className="text-center">
-            <div className="text-lg font-semibold text-slate-900">{total}</div>
-            <div className="text-[11px] text-slate-500">Nhân viên</div>
-          </div>
-        </div>
-      </div>
-      <div className="flex-1 text-xs space-y-2">
-        <div className="text-sm font-semibold text-slate-800">{title}</div>
+    <div className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-3 space-y-3">
+      <div className="text-xs text-slate-600 font-medium">{title}</div>
+      <div className="space-y-2">
         {segments.map((s) => (
-          <div key={s.label} className="flex items-center gap-2">
+          <div key={s.label} className="flex items-center gap-2 text-[11px] text-slate-700">
             <span
-              className="h-2 w-2 rounded-full"
+              className="inline-block w-3 h-3 rounded-full"
               style={{ backgroundColor: s.color }}
             />
-            <span className="text-slate-600">{s.label}</span>
-            <span className="font-semibold text-slate-900">
-              {s.value} (
-              {totalSegments > 0
-                ? Math.round((s.value / totalSegments) * 100)
-                : 0}
-              %)
+            <span className="flex-1">{s.label}</span>
+            <span className="font-semibold">{s.value}</span>
+            <span className="text-slate-500">
+              {total > 0 ? `${Math.round((s.value / total) * 100)}%` : "0%"}
             </span>
           </div>
         ))}
       </div>
     </div>
   );
-}
-
-function timeToMinutes(time?: string | null): number | null {
-  if (!time) return null;
-  const [hh, mm] = time.split(":").map((v) => parseInt(v, 10));
-  if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
-  return hh * 60 + mm;
 }

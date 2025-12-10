@@ -6,6 +6,8 @@ export type WorkStatus = "ACTIVE" | "INACTIVE";
 export interface Employee {
   code: string;
   name: string;
+  roleKey?: string;      // mã chức vụ (key)
+  roleName?: string;     // tên chức vụ để hiển thị
   phone: string;
   email: string;
   cccd: string;

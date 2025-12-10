@@ -1,23 +1,24 @@
-// component/director/DirectorShell.tsx
+// component/layout/AppShell.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { AttendanceRecord, Employee } from "@/lib/hr-types";
-import { parseAttendanceCsv, parseEmployeesCsv } from "@/lib/hr-sheet";
 import type {
   DirectorSection,
   OverviewStats,
   WorkConfig,
-} from "@/app/director/types";
-import { DirectorLayout } from "./DirectorLayout";
-
-type WorkConfigRecord = WorkConfig & {
-  id: string;
-  shift: number; // 1,2,3...
-};
-
+  WorkConfigRecord,
+} from "@/app/types";
+import {
+  fetchAttendanceFromSupabase,
+  fetchEmployeesFromSupabase,
+  fetchWorkConfigsFromSupabase,
+  updateWorkConfigInSupabase,
+} from "@/lib/supabase/hr";
+import { getSupabaseClient, isSupabaseEnabled } from "@/lib/supabase/client";
+import { AppLayout } from "./AppLayout";
 
 type WorkShift = {
   id: string; // "1"
@@ -25,7 +26,54 @@ type WorkShift = {
   shift: number;
 };
 
-export type DirectorRenderProps = {
+type NavItem = { key: DirectorSection; label: string; path: string };
+
+const NAV_ITEMS: NavItem[] = [
+  { key: "overview", label: "Tổng quan", path: "tong-quan" },
+  { key: "departments", label: "Quản lý bộ phận", path: "quan-ly-bo-phan" },
+  {
+    key: "employeesOverview",
+    label: "Tổng quan nhân viên",
+    path: "quan-ly-nhan-vien/tong-quan-nhan-vien",
+  },
+  {
+    key: "employees",
+    label: "Danh sách nhân viên",
+    path: "quan-ly-nhan-vien/danh-sach-nhan-vien",
+  },
+  { key: "attendance", label: "Quản lý chấm công", path: "quan-ly-cham-cong" },
+  { key: "shifts", label: "Quản lý ca làm", path: "quan-ly-ca-lam" },
+  { key: "roles", label: "Quản lý chức vụ", path: "quan-ly-chuc-vu" },
+];
+
+const ALL_KEYS = NAV_ITEMS.map((i) => i.key);
+
+const ROLE_SECTIONS: Record<string, DirectorSection[]> = {
+  ADMIN: ALL_KEYS,
+  DIRECTOR: ALL_KEYS,
+  MANAGER: ["overview", "departments", "employeesOverview", "employees", "attendance", "shifts"],
+  ACCOUNTANT: ["overview", "attendance"],
+  SUPERVISOR: ["overview", "attendance"],
+  EMPLOYEE: ["overview", "attendance"],
+  TEMPORARY: ["overview", "attendance"],
+};
+
+function resolveSections(roleKey?: string, custom?: string[]): DirectorSection[] {
+  const cleanedCustom = (custom || [])
+    .map((k) => (k || "").toLowerCase())
+    .filter(Boolean);
+
+  if (cleanedCustom.length) {
+    const set = new Set(cleanedCustom);
+    const filtered = NAV_ITEMS.filter((n) => set.has(n.key.toLowerCase())).map((n) => n.key);
+    if (filtered.length) return filtered;
+  }
+
+  const upper = (roleKey || "").toUpperCase();
+  return ROLE_SECTIONS[upper] || ["overview", "employees", "attendance", "shifts"];
+}
+
+export type AppShellRenderProps = {
   overviewStats: OverviewStats;
 
   // Cấu hình giờ làm theo ca
@@ -50,14 +98,23 @@ export type DirectorRenderProps = {
   filteredEmployees: Employee[];
 };
 
-export function DirectorShell(props: {
+export function AppShell(props: {
   activeSection: DirectorSection;
-  render: (p: DirectorRenderProps) => ReactNode;
+  render: (p: AppShellRenderProps) => ReactNode;
 }) {
   const { activeSection, render } = props;
   const router = useRouter();
+  const pathname = usePathname();
 
   const [accountName, setAccountName] = useState<string>("");
+  const [roleKey, setRoleKey] = useState<string>("DIRECTOR");
+  const [allowedSections, setAllowedSections] = useState<DirectorSection[]>([
+    "overview",
+    "employeesOverview",
+    "employees",
+    "attendance",
+    "shifts",
+  ]);
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -65,11 +122,9 @@ export function DirectorShell(props: {
     "all" | "fulltime" | "temporary"
   >("all");
 
-  // Nhiều cấu hình theo ca
   const [workConfigs, setWorkConfigs] = useState<WorkConfigRecord[]>([]);
   const [activeShiftId, setActiveShiftId] = useState<string>("1");
 
-  // Config đang áp dụng cho ca đang chọn
   const [workConfig, setWorkConfig] = useState<WorkConfig | null>(null);
   const [configDraft, setConfigDraft] = useState<WorkConfig>({
     standardCheckIn: "08:00",
@@ -83,6 +138,31 @@ export function DirectorShell(props: {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  function applyWorkConfigs(cfgs: WorkConfigRecord[]) {
+    setWorkConfigs(cfgs);
+    if (!cfgs.length) return;
+
+    const minShift = cfgs.reduce<number>(
+      (min, c) => (c.shift < min ? c.shift : min),
+      cfgs[0].shift
+    );
+
+    const defaultShiftId = String(minShift);
+    setActiveShiftId(defaultShiftId);
+
+    const activeCfg =
+      cfgs.find((c) => String(c.shift) === defaultShiftId) || cfgs[0];
+    const baseCfg: WorkConfig = {
+      standardCheckIn: activeCfg.standardCheckIn,
+      standardCheckOut: activeCfg.standardCheckOut,
+      lateGraceMinutes: activeCfg.lateGraceMinutes,
+      earlyLeaveGraceMinutes: activeCfg.earlyLeaveGraceMinutes,
+      overtimeThresholdMinutes: activeCfg.overtimeThresholdMinutes,
+    };
+    setWorkConfig(baseCfg);
+    setConfigDraft(baseCfg);
+  }
 
   // Auth guard
   useEffect(() => {
@@ -98,9 +178,21 @@ export function DirectorShell(props: {
 
     try {
       const acc = JSON.parse(raw);
-      setAccountName(acc.fullName || "Giám đốc");
+      setAccountName(acc.fullName || "Người dùng");
+      const resolvedRole = acc.role || acc.roleKey || "DIRECTOR";
+      setRoleKey(resolvedRole);
+
+      const customSections: string[] | undefined =
+        Array.isArray(acc.allowedSections) && acc.allowedSections.length
+          ? acc.allowedSections
+          : Array.isArray(acc.permissions)
+          ? acc.permissions
+          : undefined;
+      setAllowedSections(resolveSections(resolvedRole, customSections));
     } catch {
-      setAccountName("Giám đốc");
+      setAccountName("Người dùng");
+      setRoleKey("DIRECTOR");
+      setAllowedSections(resolveSections("DIRECTOR"));
     }
   }, [router]);
 
@@ -110,78 +202,20 @@ export function DirectorShell(props: {
       try {
         setError(null);
 
-        // Employees
-        const empUrl = process.env.NEXT_PUBLIC_EMPLOYEES_CSV_URL;
-        if (!empUrl)
-          throw new Error("Thiếu NEXT_PUBLIC_EMPLOYEES_CSV_URL trong .env");
-        const empRes = await fetch(empUrl);
-        const empCsv = await empRes.text();
-        const empList = parseEmployeesCsv(empCsv);
+        if (!isSupabaseEnabled()) {
+          throw new Error("Thiếu cấu hình Supabase (URL/ANON KEY)");
+        }
+
+        const supabase = getSupabaseClient();
+        const [empList, attList, cfgs] = await Promise.all([
+          fetchEmployeesFromSupabase(supabase),
+          fetchAttendanceFromSupabase(supabase),
+          fetchWorkConfigsFromSupabase(supabase),
+        ]);
+
         setEmployees(empList);
-
-        // Attendance
-        const attUrl = process.env.NEXT_PUBLIC_ATTENDANCE_CSV_URL;
-        if (attUrl) {
-          const attRes = await fetch(attUrl);
-          const attCsv = await attRes.text();
-          const attList = parseAttendanceCsv(attCsv);
-          setAttendance(attList);
-        }
-
-        // Work configs (nhiều ca)
-        const base =
-          process.env.NEXT_PUBLIC_MOCKAPI_BASE_URL ||
-          process.env.MOCKAPI_BASE_URL;
-        if (base) {
-          const cfgRes = await fetch(`${base}/workConfigs`);
-          if (cfgRes.ok) {
-            const rawList: unknown = await cfgRes.json();
-            if (Array.isArray(rawList)) {
-              const cfgs: WorkConfigRecord[] = rawList.map((raw) => {
-                const r = raw as Partial<WorkConfigRecord>;
-                return {
-                  id: String(r.id ?? ""),
-                  shift: Number(r.shift ?? 1),
-                  standardCheckIn: r.standardCheckIn || "08:00",
-                  standardCheckOut: r.standardCheckOut || "17:00",
-                  lateGraceMinutes: Number(r.lateGraceMinutes ?? 5),
-                  earlyLeaveGraceMinutes: Number(
-                    r.earlyLeaveGraceMinutes ?? 5
-                  ),
-                  overtimeThresholdMinutes: Number(
-                    r.overtimeThresholdMinutes ?? 60
-                  ),
-                };
-              });
-
-              setWorkConfigs(cfgs);
-
-              if (cfgs.length > 0) {
-                // default: ca có shift nhỏ nhất
-                const minShift = cfgs.reduce<number>(
-                    (min, c) => (c.shift < min ? c.shift : min),
-                    cfgs[0].shift
-                    );
-
-                const defaultShiftId = String(minShift);
-                setActiveShiftId(defaultShiftId);
-
-                const activeCfg =
-                  cfgs.find((c) => String(c.shift) === defaultShiftId) ||
-                  cfgs[0];
-                const baseCfg: WorkConfig = {
-                  standardCheckIn: activeCfg.standardCheckIn,
-                  standardCheckOut: activeCfg.standardCheckOut,
-                  lateGraceMinutes: activeCfg.lateGraceMinutes,
-                  earlyLeaveGraceMinutes: activeCfg.earlyLeaveGraceMinutes,
-                  overtimeThresholdMinutes: activeCfg.overtimeThresholdMinutes,
-                };
-                setWorkConfig(baseCfg);
-                setConfigDraft(baseCfg);
-              }
-            }
-          }
-        }
+        setAttendance(attList);
+        applyWorkConfigs(cfgs);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Không tải được dữ liệu";
         console.error(err);
@@ -213,6 +247,11 @@ export function DirectorShell(props: {
     setConfigDraft(cfg);
   }, [activeShiftId, workConfigs]);
 
+  const menuItems = useMemo(() => {
+    const allowSet = new Set(allowedSections);
+    return NAV_ITEMS.filter((n) => allowSet.has(n.key));
+  }, [allowedSections]);
+
   const workShifts: WorkShift[] = useMemo(
     () =>
       workConfigs.map((cfg) => ({
@@ -224,7 +263,12 @@ export function DirectorShell(props: {
   );
 
   const overviewStats: OverviewStats = useMemo(() => {
-    const active = employees.filter((e) => e.workStatus === "ACTIVE");
+    const active = employees.filter(
+      (e) =>
+        e.workStatus === "ACTIVE" &&
+        e.roleKey !== "DIRECTOR" &&
+        e.roleKey !== "ADMIN"
+    );
 
     let currentDate: string | null = null;
     if (attendance.length) {
@@ -320,6 +364,7 @@ export function DirectorShell(props: {
 
   const filteredEmployees = useMemo(() => {
     return employees.filter((e) => {
+      if (e.roleKey === "ADMIN") return false;
       if (employeeTab === "fulltime") return e.employmentType === "FULL_TIME";
       if (employeeTab === "temporary") return e.employmentType === "TEMPORARY";
       return true;
@@ -328,13 +373,6 @@ export function DirectorShell(props: {
 
   async function handleSaveWorkConfig() {
     setConfigMessage(null);
-    const base =
-      process.env.NEXT_PUBLIC_MOCKAPI_BASE_URL ||
-      process.env.MOCKAPI_BASE_URL;
-    if (!base) {
-      setConfigMessage("Thiếu NEXT_PUBLIC_MOCKAPI_BASE_URL trong .env");
-      return;
-    }
 
     const target = workConfigs.find(
       (c) => String(c.shift) === activeShiftId
@@ -344,45 +382,27 @@ export function DirectorShell(props: {
       return;
     }
 
+    const payload = {
+      standardCheckIn: configDraft.standardCheckIn,
+      standardCheckOut: configDraft.standardCheckOut,
+      lateGraceMinutes: configDraft.lateGraceMinutes,
+      earlyLeaveGraceMinutes: configDraft.earlyLeaveGraceMinutes,
+      overtimeThresholdMinutes: configDraft.overtimeThresholdMinutes,
+    };
+
     try {
       setSavingConfig(true);
 
-      const payload = {
-        shift: target.shift,
-        standardCheckIn: configDraft.standardCheckIn,
-        standardCheckOut: configDraft.standardCheckOut,
-        lateGraceMinutes: configDraft.lateGraceMinutes,
-        earlyLeaveGraceMinutes: configDraft.earlyLeaveGraceMinutes,
-        overtimeThresholdMinutes: configDraft.overtimeThresholdMinutes,
-      };
+      if (!isSupabaseEnabled()) {
+        throw new Error("Thiếu cấu hình Supabase (URL/ANON KEY)");
+      }
 
-      const res = await fetch(`${base}/workConfigs/${target.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error("Lưu cấu hình thất bại");
-
-      const updatedRaw = await res.json();
-      const updated: WorkConfigRecord = {
-        id: String(updatedRaw.id ?? target.id),
-        shift: Number(updatedRaw.shift ?? target.shift),
-        standardCheckIn:
-          updatedRaw.standardCheckIn ?? payload.standardCheckIn,
-        standardCheckOut:
-          updatedRaw.standardCheckOut ?? payload.standardCheckOut,
-        lateGraceMinutes: Number(
-          updatedRaw.lateGraceMinutes ?? payload.lateGraceMinutes
-        ),
-        earlyLeaveGraceMinutes: Number(
-          updatedRaw.earlyLeaveGraceMinutes ??
-            payload.earlyLeaveGraceMinutes
-        ),
-        overtimeThresholdMinutes: Number(
-          updatedRaw.overtimeThresholdMinutes ??
-            payload.overtimeThresholdMinutes
-        ),
-      };
+      const supabase = getSupabaseClient();
+      const updated = await updateWorkConfigInSupabase(
+        target.id,
+        payload,
+        supabase
+      );
 
       setWorkConfigs((prev) =>
         prev.map((c) => (c.id === target.id ? updated : c))
@@ -408,14 +428,12 @@ export function DirectorShell(props: {
   }
 
   const handleNavigate = (s: DirectorSection) => {
-    const path =
-      s === "overview"
-        ? "/director/dashboard"
-        : s === "employees"
-        ? "/director/employees"
-        : s === "attendance"
-        ? "/director/attendance"
-        : "/director/shifts";
+    const allowSet = new Set(allowedSections);
+    if (!allowSet.has(s)) return;
+    const found = NAV_ITEMS.find((n) => n.key === s);
+    const parts = pathname.split("/").filter(Boolean);
+    const slug = parts[0] || "";
+    const path = found ? `/${slug}/${found.path}` : `/${slug}/tong-quan`;
     router.push(path);
   };
 
@@ -425,9 +443,11 @@ export function DirectorShell(props: {
   }
 
   return (
-    <DirectorLayout
+    <AppLayout
       accountName={accountName}
       section={activeSection}
+      roleKey={roleKey}
+      menuItems={menuItems}
       onNavigate={handleNavigate}
       onLogout={handleLogout}
     >
@@ -458,7 +478,7 @@ export function DirectorShell(props: {
           setEmployeeTab,
           filteredEmployees,
         })}
-    </DirectorLayout>
+    </AppLayout>
   );
 }
 

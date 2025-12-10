@@ -15,11 +15,7 @@
     "seed": "node prisma/seed.js"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.0",
-    "@supabase/supabase-js": "^2.87.0",
-    "bcryptjs": "^3.0.3",
-    "chart.js": "^4.5.1",
-    "next": "16.0.6",
+    "next": "^16.0.8",
     "react": "19.2.0",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "19.2.0",
@@ -32,7 +28,7 @@
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.22",
     "eslint": "^9",
-    "eslint-config-next": "16.0.6",
+    "eslint-config-next": "^16.0.8",
     "postcss": "^8.5.6",
     "prisma": "^6.19.0",
     "tailwindcss": "^4.1.17",

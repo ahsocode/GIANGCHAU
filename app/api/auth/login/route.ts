@@ -1,6 +1,14 @@
 // app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { findAccountByEmailPassword } from "@/lib/mockapi";
+import {
+  findAccountByEmailPasswordSupabase,
+  isSupabaseAuthEnabled,
+} from "@/lib/supabase/auth";
+import {
+  findAccountByEmailPasswordPrisma,
+  isPrismaEnabled,
+} from "@/lib/prisma/auth";
+import type { Account } from "@/lib/types/account";
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +21,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const account = await findAccountByEmailPassword(email, password);
+    const prismaEnabled = isPrismaEnabled();
+    const supabaseEnabled = isSupabaseAuthEnabled();
+
+    if (!prismaEnabled && !supabaseEnabled) {
+      return NextResponse.json(
+        { error: "Thiếu cấu hình Prisma hoặc Supabase" },
+        { status: 500 }
+      );
+    }
+
+    let account: Account | null = null;
+
+    if (prismaEnabled) {
+      account = await findAccountByEmailPasswordPrisma(email, password);
+    }
+
+    if (!account && supabaseEnabled) {
+      account = await findAccountByEmailPasswordSupabase(email, password);
+    }
 
     if (!account) {
       return NextResponse.json(

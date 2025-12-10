@@ -21,11 +21,15 @@ export interface DailySummary {
   absent: DailyCounts;
 }
 
-// Helper đếm theo loại nhân viên
+// Helper đếm theo loại nhân viên (bỏ qua giám đốc)
 function countByType(employeeCodes: string[], employees: Employee[]): DailyCounts {
   const setCodes = new Set(employeeCodes);
   const selected = employees.filter(
-    (e) => e.workStatus === "ACTIVE" && setCodes.has(e.code)
+    (e) =>
+      e.workStatus === "ACTIVE" &&
+      e.roleKey !== "DIRECTOR" &&
+      e.roleKey !== "ADMIN" &&
+      setCodes.has(e.code)
   );
 
   const fullTime = selected.filter((e) => e.employmentType === "FULL_TIME").length;
@@ -43,7 +47,12 @@ export function computeDailySummary(
   employees: Employee[],
   attendance: AttendanceRecord[]
 ): DailySummary {
-  const activeEmployees = employees.filter((e) => e.workStatus === "ACTIVE");
+  const activeEmployees = employees.filter(
+    (e) =>
+      e.workStatus === "ACTIVE" &&
+      e.roleKey !== "DIRECTOR" &&
+      e.roleKey !== "ADMIN"
+  );
 
   // Attendance trong ngày
   const attInDay = attendance.filter((a) => a.date === date);

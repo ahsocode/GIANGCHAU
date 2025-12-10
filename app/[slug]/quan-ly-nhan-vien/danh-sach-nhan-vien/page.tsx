@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import type { Employee } from "@/lib/hr-types";
-import { DirectorShell } from "@/component/director/DirectorShell";
+import { AppShell } from "@/component/layout/AppShell";
 
 type EmployeeTab = "all" | "fulltime" | "temporary";
 
-export default function DirectorEmployeesPage() {
+export default function EmployeesListPage() {
   return (
-    <DirectorShell
+    <AppShell
       activeSection="employees"
       render={({ employeeTab, setEmployeeTab, filteredEmployees }) => (
         <EmployeesSection
@@ -31,7 +31,6 @@ function EmployeesSection(props: {
     null
   );
 
-  // Helper hiển thị ca làm
   const getShiftLabel = (e: Employee) =>
     e.shiftCode ? `Ca ${e.shiftCode}` : "-";
 
@@ -59,16 +58,14 @@ function EmployeesSection(props: {
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-800">
-              Danh sách nhân viên{" "}
+              Danh sách nhân viên {" "}
               {tab === "all"
                 ? "(tất cả)"
                 : tab === "fulltime"
                 ? "(chính thức)"
                 : "(thời vụ)"}
             </h2>
-            <div className="text-xs text-slate-400">
-              Dữ liệu lấy trực tiếp từ Google Sheet
-            </div>
+            <div className="text-xs text-slate-400">Dữ liệu lấy từ Supabase</div>
           </div>
 
           <div className="overflow-x-auto">
@@ -77,10 +74,9 @@ function EmployeesSection(props: {
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">Mã NV</th>
                   <th className="px-3 py-2 text-left font-medium">Họ và tên</th>
+                  <th className="px-3 py-2 text-left font-medium">Chức vụ</th>
                   <th className="px-3 py-2 text-left font-medium">Loại</th>
-                  <th className="px-3 py-2 text-left font-medium">
-                    Phòng ban / xưởng
-                  </th>
+                  <th className="px-3 py-2 text-left font-medium">Bộ phận</th>
                   <th className="px-3 py-2 text-left font-medium">Ca làm</th>
                   <th className="px-3 py-2 text-left font-medium">
                     Trạng thái làm việc
@@ -92,7 +88,7 @@ function EmployeesSection(props: {
                 {employees.length === 0 && (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-3 py-4 text-center text-slate-400"
                     >
                       Chưa có nhân viên nào trong danh sách.
@@ -107,6 +103,7 @@ function EmployeesSection(props: {
                   >
                     <td className="px-3 py-2">{e.code}</td>
                     <td className="px-3 py-2">{e.name}</td>
+                    <td className="px-3 py-2">{e.roleName || e.roleKey || "-"}</td>
                     <td className="px-3 py-2">
                       {e.employmentType === "FULL_TIME"
                         ? "Chính thức"
@@ -193,6 +190,7 @@ function EmployeeDetailModal(props: {
 
         <div className="px-4 py-4 space-y-3 text-xs text-slate-700">
           <DetailRow label="Mã nhân viên" value={employee.code} />
+          <DetailRow label="Chức vụ" value={employee.roleName || employee.roleKey || "-"} />
           <DetailRow
             label="Loại"
             value={

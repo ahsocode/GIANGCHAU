@@ -1,6 +1,15 @@
 import type { AttendanceRecord, Employee } from "@/lib/hr-types";
 
-export type DirectorSection = "overview" | "employees" | "attendance" | "shifts";
+export type DirectorSection =
+  | "overview"
+  | "employeesOverview"
+  | "employees"
+  | "attendance"
+  | "shifts"
+  | "departments"
+  | "factories"
+  | "roles"
+  | "permissions";
 
 export type WorkConfig = {
   standardCheckIn: string; // "08:00"
@@ -10,10 +19,32 @@ export type WorkConfig = {
   overtimeThresholdMinutes: number;
 };
 
+export type WorkConfigRecord = WorkConfig & {
+  id: string;
+  shift: number; // 1,2,3...
+  name?: string | null;
+  capacities?: WorkShiftCapacity[];
+};
+
 export type WorkShift = {
-  id: string;      
-  shift: string;   
+  id: string;
+  shift: string;
   description?: string;
+};
+
+export type Department = {
+  id: string;
+  code: string;
+  name: string;
+  notes?: string | null;
+};
+
+export type WorkShiftCapacity = {
+  id: string | number;
+  workConfigId: string | number;
+  departmentId: string;
+  maxEmployees: number;
+  department?: Department;
 };
 
 export type OverviewStats = {

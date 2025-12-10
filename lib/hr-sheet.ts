@@ -90,6 +90,7 @@ export function parseEmployeesCsv(csv: string): Employee[] {
   const idxEmail = findCol(["gmail", "email"]);
   const idxCccd = findCol(["cccd"]);
   const idxBhxh = findCol(["bhxh"]);
+  const idxRole = findCol(["chuc vu", "chức vụ", "role", "position"]);
   const idxEmpType = findCol(["trạng thái nhân viên", "employee type"]);
   const idxWorkStatus = findCol(["trạng thái đi làm", "work status"]);
   const idxStartDate = findCol(["ngày vào làm", "start date"]);
@@ -105,6 +106,7 @@ export function parseEmployeesCsv(csv: string): Employee[] {
       return {
         code: r[idxCode],
         name: r[idxName],
+        roleName: idxRole !== -1 ? r[idxRole] : undefined,
         phone: r[idxPhone],
         email: r[idxEmail],
         cccd: r[idxCccd],

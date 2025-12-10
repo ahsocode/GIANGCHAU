@@ -2,14 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { slugifyRole } from "@/lib/auth/role";
 
-type UserRole =
-  | "DIRECTOR"
-  | "MANAGER"
-  | "ACCOUNTANT"
-  | "SUPERVISOR"
-  | "EMPLOYEE"
-  | "TEMPORARY";
+type UserRole = string;
 
 interface Account {
   id: string;
@@ -18,6 +13,8 @@ interface Account {
   email: string;
   phone: string;
   role: UserRole;
+  roleSlug?: string | null;
+  slug?: string | null;
   loginType: "PASSWORD" | "GOOGLE";
   isActive: boolean;
   createdAt: string;
@@ -55,17 +52,12 @@ export default function LoginPage() {
         localStorage.setItem("currentAccount", JSON.stringify(account));
       }
 
-      switch (account.role) {
-        case "DIRECTOR":
-          router.push("/director");
-          break;
-        case "MANAGER":
-          router.push("/manager");
-          break;
-        default:
-          router.push("/employee");
-          break;
-      }
+      const slug = slugifyRole(
+        account.slug || undefined,
+        account.roleSlug || undefined,
+        account.role
+      );
+      router.push(`/${slug}/tong-quan`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Đăng nhập thất bại";
       setError(message);

@@ -34,7 +34,7 @@ export default function EmployeeOverviewPage() {
           <div className="space-y-6">
             <HeaderStats totals={totals} />
             <RoleTable buckets={roleBuckets} grandTotal={totals.total} />
-            <Charts buckets={roleBuckets} grandTotal={totals.total} />
+            <Charts buckets={roleBuckets} />
           </div>
         );
       }}
@@ -171,7 +171,7 @@ function RoleTable({ buckets, grandTotal }: { buckets: RoleBucket[]; grandTotal:
   );
 }
 
-function Charts({ buckets, grandTotal }: { buckets: RoleBucket[]; grandTotal: number }) {
+function Charts({ buckets }: { buckets: RoleBucket[] }) {
   const top = buckets.slice(0, 6);
   const doughnutData = useMemo(() => {
     const labels = top.map((b) => b.roleLabel);

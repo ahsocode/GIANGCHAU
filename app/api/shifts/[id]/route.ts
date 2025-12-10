@@ -1,9 +1,10 @@
 "use server";
 
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma, isPrismaEnabled } from "@/lib/prisma/client";
 
-const includeCapacities = { capacities: { include: { department: true } } } as const;
+const includeCapacities: Prisma.WorkConfigInclude = { capacities: { include: { department: true } } };
 
 export async function PATCH(
   req: NextRequest,
@@ -51,11 +52,11 @@ export async function PATCH(
                 .map((c) => ({
                   departmentId: c?.departmentId as string,
                   maxEmployees: Number(c?.maxEmployees) || 0,
-              })),
+                })),
             }
           : undefined,
       },
-      include: includeCapacities as any,
+      include: includeCapacities,
     });
     return NextResponse.json(updated);
   } catch (err: unknown) {

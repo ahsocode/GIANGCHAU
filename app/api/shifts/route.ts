@@ -1,9 +1,10 @@
 "use server";
 
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma, isPrismaEnabled } from "@/lib/prisma/client";
 
-const includeCapacities = { capacities: { include: { department: true } } } as const;
+const includeCapacities: Prisma.WorkConfigInclude = { capacities: { include: { department: true } } };
 
 export async function GET() {
   if (!isPrismaEnabled()) {
@@ -12,7 +13,7 @@ export async function GET() {
 
   const data = await prisma.workConfig.findMany({
     orderBy: [{ shift: "asc" }],
-    include: includeCapacities as any,
+    include: includeCapacities,
   });
 
   return NextResponse.json(data);
@@ -39,6 +40,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Thiếu trường bắt buộc" }, { status: 400 });
   }
 
+  const capacityCreates = Array.isArray(capacities)
+    ? capacities
+        .filter((c: { departmentId?: string; maxEmployees?: number } | null | undefined) => {
+          return c?.departmentId && c.maxEmployees != null;
+        })
+        .map((c) => ({
+          departmentId: c?.departmentId as string,
+          maxEmployees: Number(c?.maxEmployees) || 0,
+        }))
+    : undefined;
+
   try {
     const created = await prisma.workConfig.create({
       data: {
@@ -49,20 +61,14 @@ export async function POST(req: Request) {
         lateGraceMinutes: Number(lateGraceMinutes),
         earlyLeaveGraceMinutes: Number(earlyLeaveGraceMinutes),
         overtimeThresholdMinutes: Number(overtimeThresholdMinutes),
-        capacities: {
-          create:
-            Array.isArray(capacities) &&
-            capacities
-              .filter((c: { departmentId?: string; maxEmployees?: number } | null | undefined) => {
-                return c?.departmentId && c.maxEmployees != null;
-              })
-              .map((c) => ({
-                departmentId: c?.departmentId as string,
-                maxEmployees: Number(c?.maxEmployees) || 0,
-              })),
-        },
+        capacities:
+          capacityCreates && capacityCreates.length > 0
+            ? {
+                create: capacityCreates,
+              }
+            : undefined,
       },
-      include: includeCapacities as any,
+      include: includeCapacities,
     });
 
     return NextResponse.json(created);

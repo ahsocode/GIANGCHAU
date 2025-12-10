@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { AppShell } from "@/component/layout/AppShell";
 import type { AttendanceRecord, Employee } from "@/lib/hr-types";
 import type { WorkConfig } from "@/app/types";
@@ -54,45 +54,21 @@ function DashboardSection({ employees, attendance, workShifts, workConfigs }: Da
     return m;
   }, [employees]);
 
-  const dateInRange = (date: string) => {
-    const d = new Date(date);
-    if (rangeType === "day") {
-      return date === selectedDay;
-    }
-    if (rangeType === "week") {
-      return d >= weekStart && d <= weekEnd;
-    }
-    if (!selectedMonth) return false;
-    const [y, m] = selectedMonth.split("-").map((v) => parseInt(v, 10));
-    return d.getFullYear() === y && d.getMonth() + 1 === m;
-  };
-
-  const todayDate = useMemo(() => new Date(todayIso), [todayIso]);
-
-  const dateRangeList = useMemo(() => {
-    const dates: string[] = [];
-    let start: Date;
-    let end: Date;
-    if (rangeType === "day") {
-        const day = new Date(selectedDay);
-        if (day > todayDate) return [];
-        return [selectedDay];
-    }
-    if (rangeType === "week") {
-      start = new Date(weekStart);
-      end = new Date(weekEnd);
-    } else {
+  const dateInRange = useCallback(
+    (date: string) => {
+      const d = new Date(date);
+      if (rangeType === "day") {
+        return date === selectedDay;
+      }
+      if (rangeType === "week") {
+        return d >= weekStart && d <= weekEnd;
+      }
+      if (!selectedMonth) return false;
       const [y, m] = selectedMonth.split("-").map((v) => parseInt(v, 10));
-      start = new Date(y, m - 1, 1);
-      end = endOfMonth(start);
-    }
-    if (end > todayDate) end = new Date(todayDate);
-    if (start > end) return [];
-    for (let cur = new Date(start); cur <= end; cur.setDate(cur.getDate() + 1)) {
-      dates.push(new Date(cur).toISOString().slice(0, 10));
-    }
-    return dates;
-  }, [rangeType, selectedDay, selectedMonth, weekStart, weekEnd, todayDate]);
+      return d.getFullYear() === y && d.getMonth() + 1 === m;
+    },
+    [rangeType, selectedDay, selectedMonth, weekEnd, weekStart]
+  );
 
   const getConfigForEmployee = useMemo(
     () => (e: Employee): WorkConfig => {
@@ -156,12 +132,6 @@ function DashboardSection({ employees, attendance, workShifts, workConfigs }: Da
     shiftFilter,
     workConfigs,
   ]);
-
-  const formatDate = (iso?: string | null) => {
-    if (!iso) return "";
-    const [y, m, d] = iso.split("-");
-    return `${d}/${m}/${y}`;
-  };
 
   return (
     <div className="space-y-4">
@@ -281,8 +251,4 @@ function startOfWeek(date: Date): Date {
 function endOfWeek(date: Date): Date {
   const start = startOfWeek(date);
   return new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
-}
-
-function endOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
 }

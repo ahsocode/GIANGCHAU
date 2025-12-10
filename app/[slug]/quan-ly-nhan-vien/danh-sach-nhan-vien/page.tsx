@@ -76,9 +76,7 @@ function EmployeesSection(props: {
                   <th className="px-3 py-2 text-left font-medium">Họ và tên</th>
                   <th className="px-3 py-2 text-left font-medium">Chức vụ</th>
                   <th className="px-3 py-2 text-left font-medium">Loại</th>
-                  <th className="px-3 py-2 text-left font-medium">
-                    Phòng ban / xưởng
-                  </th>
+                  <th className="px-3 py-2 text-left font-medium">Bộ phận</th>
                   <th className="px-3 py-2 text-left font-medium">Ca làm</th>
                   <th className="px-3 py-2 text-left font-medium">
                     Trạng thái làm việc

@@ -11,9 +11,6 @@
     "prisma:push": "prisma db push",
     "prisma:seed": "prisma db seed"
   },
-  "prisma": {
-    "seed": "node prisma/seed.js"
-  },
   "dependencies": {
     "@prisma/client": "^6.19.0",
     "@supabase/supabase-js": "^2.87.1",

@@ -2,6 +2,17 @@ import { NextResponse } from "next/server";
 import type { DirectorSection } from "@/app/types";
 import { prisma, isPrismaEnabled } from "@/lib/prisma/client";
 
+// Prisma client có thể chưa sinh model appSection trên môi trường build hiện tại,
+// dùng cast any để tránh lỗi type khi compile.
+const db = prisma as unknown as {
+  appSection: {
+    findMany: typeof prisma.appSection.findMany;
+  };
+  role: typeof prisma.role;
+  roleSectionAccess: typeof prisma.roleSectionAccess;
+  $transaction: typeof prisma.$transaction;
+};
+
 const LOCKED_ROLES = new Set(["ADMIN", "DIRECTOR"]);
 
 function badRequest(message: string) {
@@ -21,15 +32,15 @@ export async function GET() {
   }
 
   const [sections, roles, access] = await Promise.all([
-    prisma.appSection.findMany({
+    db.appSection.findMany({
       where: { isEnabled: true },
       orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
     }),
-    prisma.role.findMany({
+    db.role.findMany({
       select: { key: true, name: true, isDirector: true },
       orderBy: { id: "asc" },
     }),
-    prisma.roleSectionAccess.findMany({
+    db.roleSectionAccess.findMany({
       include: { role: true, section: true },
     }),
   ]);
@@ -78,10 +89,10 @@ export async function PUT(req: Request) {
   if (!sections.length) return badRequest("Danh sách section trống");
   if (LOCKED_ROLES.has(roleKey)) return unauthorized("Không thể sửa quyền Admin/Giám đốc");
 
-  const role = await prisma.role.findUnique({ where: { key: roleKey } });
+  const role = await db.role.findUnique({ where: { key: roleKey } });
   if (!role) return badRequest("Role không tồn tại");
 
-  const allSections = await prisma.appSection.findMany({
+  const allSections = await db.appSection.findMany({
     where: { key: { in: sections } },
   });
   const sectionIdByKey = new Map(allSections.map((s) => [s.key, s.id]));
@@ -91,7 +102,7 @@ export async function PUT(req: Request) {
     .map((k) => sectionIdByKey.get(k))
     .filter((v) => typeof v === "number") as number[];
 
-  await prisma.$transaction(async (tx) => {
+  await db.$transaction(async (tx) => {
     await tx.roleSectionAccess.deleteMany({
       where: {
         roleId: role.id,

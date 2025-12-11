@@ -12,6 +12,12 @@ import type {
   WorkConfigRecord,
 } from "@/app/types";
 import {
+  DEFAULT_ROLE_SECTIONS,
+  loadRolePermissions,
+  sanitizeRoleSections,
+  ROLE_PERMISSIONS_STORAGE_KEY,
+} from "@/lib/role-permissions";
+import {
   fetchAttendanceFromSupabase,
   fetchEmployeesFromSupabase,
   fetchWorkConfigsFromSupabase,
@@ -41,9 +47,22 @@ const NAV_ITEMS: NavItem[] = [
     label: "Danh sách nhân viên",
     path: "quan-ly-nhan-vien/danh-sach-nhan-vien",
   },
+  {
+    key: "employeeInfo",
+    label: "Thông tin nhân viên",
+    path: "quan-ly-nhan-vien/thong-tin-nhan-vien",
+  },
+  {
+    key: "employeeAccounts",
+    label: "Quản lý tài khoản",
+path: "quan-ly-nhan-vien/quan-ly-tai-khoan",
+  },
   { key: "attendance", label: "Quản lý chấm công", path: "quan-ly-cham-cong" },
-  { key: "shifts", label: "Quản lý ca làm", path: "quan-ly-ca-lam" },
-  { key: "roles", label: "Quản lý chức vụ", path: "quan-ly-chuc-vu" },
+  { key: "shiftOverview", label: "Tổng quan ca làm", path: "quan-ly-ca-lam/tong-quan-ca-lam" },
+  { key: "shifts", label: "Ca làm", path: "quan-ly-ca-lam/ca-lam" },
+  { key: "shiftAssignment", label: "Phân ca", path: "quan-ly-ca-lam/phan-ca" },
+  { key: "permissions", label: "Phân quyền", path: "quan-ly-chuc-vu/phan-quyen" },
+  { key: "roles", label: "Chức vụ", path: "quan-ly-chuc-vu/chuc-vu" },
 ];
 
 const ALL_KEYS = NAV_ITEMS.map((i) => i.key);
@@ -51,26 +70,35 @@ const ALL_KEYS = NAV_ITEMS.map((i) => i.key);
 const ROLE_SECTIONS: Record<string, DirectorSection[]> = {
   ADMIN: ALL_KEYS,
   DIRECTOR: ALL_KEYS,
-  MANAGER: ["overview", "departments", "employeesOverview", "employees", "attendance", "shifts"],
-  ACCOUNTANT: ["overview", "attendance"],
-  SUPERVISOR: ["overview", "attendance"],
-  EMPLOYEE: ["overview", "attendance"],
-  TEMPORARY: ["overview", "attendance"],
+  ...DEFAULT_ROLE_SECTIONS,
 };
 
-function resolveSections(roleKey?: string, custom?: string[]): DirectorSection[] {
+function resolveSections(
+  roleKey?: string,
+  custom?: string[],
+  overrides?: Record<string, DirectorSection[]>
+): DirectorSection[] {
+  const upper = (roleKey || "").toUpperCase();
+  if (upper === "ADMIN" || upper === "DIRECTOR") return ALL_KEYS;
+
   const cleanedCustom = (custom || [])
     .map((k) => (k || "").toLowerCase())
     .filter(Boolean);
-
   if (cleanedCustom.length) {
     const set = new Set(cleanedCustom);
     const filtered = NAV_ITEMS.filter((n) => set.has(n.key.toLowerCase())).map((n) => n.key);
     if (filtered.length) return filtered;
   }
 
-  const upper = (roleKey || "").toUpperCase();
-  return ROLE_SECTIONS[upper] || ["overview", "employees", "attendance", "shifts"];
+  const override = overrides?.[upper];
+  if (override && override.length) {
+    return sanitizeRoleSections(upper, override, ALL_KEYS);
+  }
+
+  const defaults = ROLE_SECTIONS[upper];
+  if (defaults && defaults.length) return defaults;
+
+  return [];
 }
 
 export type AppShellRenderProps = {
@@ -108,13 +136,9 @@ export function AppShell(props: {
 
   const [accountName, setAccountName] = useState<string>("");
   const [roleKey, setRoleKey] = useState<string>("DIRECTOR");
-  const [allowedSections, setAllowedSections] = useState<DirectorSection[]>([
-    "overview",
-    "employeesOverview",
-    "employees",
-    "attendance",
-    "shifts",
-  ]);
+  const [accountSections, setAccountSections] = useState<string[] | undefined>(undefined);
+  const [roleOverrides, setRoleOverrides] = useState<Record<string, DirectorSection[]>>({});
+  const [allowedSections, setAllowedSections] = useState<DirectorSection[]>([]);
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -148,8 +172,8 @@ export function AppShell(props: {
       cfgs[0].shift
     );
 
-    const defaultShiftId = String(minShift);
-    setActiveShiftId(defaultShiftId);
+  const defaultShiftId = String(minShift);
+  setActiveShiftId(defaultShiftId);
 
     const activeCfg =
       cfgs.find((c) => String(c.shift) === defaultShiftId) || cfgs[0];
@@ -172,6 +196,11 @@ export function AppShell(props: {
         : null;
 
     if (!raw) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("currentAccount");
+        localStorage.removeItem(ROLE_PERMISSIONS_STORAGE_KEY);
+        localStorage.removeItem("sidebarOpen");
+      }
       router.replace("/login");
       return;
     }
@@ -188,13 +217,38 @@ export function AppShell(props: {
           : Array.isArray(acc.permissions)
           ? acc.permissions
           : undefined;
-      setAllowedSections(resolveSections(resolvedRole, customSections));
+      setAccountSections(customSections);
+      setAllowedSections(resolveSections(resolvedRole, customSections, roleOverrides));
     } catch {
       setAccountName("Người dùng");
       setRoleKey("DIRECTOR");
-      setAllowedSections(resolveSections("DIRECTOR"));
+      setAccountSections(undefined);
+      setAllowedSections(resolveSections("DIRECTOR", undefined, roleOverrides));
     }
-  }, [router]);
+  }, [router, roleOverrides]);
+
+  useEffect(() => {
+    async function loadRoleAccess() {
+      try {
+        const res = await fetch("/api/permissions/sections", { cache: "no-store" });
+        if (!res.ok) throw new Error("Không tải được cấu hình phân quyền");
+        const data = await res.json();
+        if (data?.roleAccess) {
+          setRoleOverrides(data.roleAccess);
+          return;
+        }
+      } catch (err) {
+        console.warn("Không tải được roleAccess từ API, dùng fallback localStorage.", err);
+      }
+      setRoleOverrides(loadRolePermissions());
+    }
+
+    loadRoleAccess();
+  }, []);
+
+  useEffect(() => {
+    setAllowedSections(resolveSections(roleKey, accountSections, roleOverrides));
+  }, [roleKey, accountSections, roleOverrides]);
 
   // Load data
   useEffect(() => {
@@ -213,7 +267,10 @@ export function AppShell(props: {
           fetchWorkConfigsFromSupabase(supabase),
         ]);
 
-        setEmployees(empList);
+        const filteredEmp = empList.filter(
+          (e) => (e.roleKey || "").toUpperCase() !== "ADMIN"
+        );
+        setEmployees(filteredEmp);
         setAttendance(attList);
         applyWorkConfigs(cfgs);
       } catch (err: unknown) {
@@ -247,10 +304,16 @@ export function AppShell(props: {
     setConfigDraft(cfg);
   }, [activeShiftId, workConfigs]);
 
+  const effectiveSections = useMemo(() => {
+    const base = allowedSections.length ? [...allowedSections] : ALL_KEYS;
+    if (!base.includes(activeSection)) base.push(activeSection);
+    return base;
+  }, [allowedSections, activeSection]);
+
   const menuItems = useMemo(() => {
-    const allowSet = new Set(allowedSections);
+    const allowSet = new Set(effectiveSections);
     return NAV_ITEMS.filter((n) => allowSet.has(n.key));
-  }, [allowedSections]);
+  }, [effectiveSections]);
 
   const workShifts: WorkShift[] = useMemo(
     () =>
@@ -428,7 +491,7 @@ export function AppShell(props: {
   }
 
   const handleNavigate = (s: DirectorSection) => {
-    const allowSet = new Set(allowedSections);
+    const allowSet = new Set(effectiveSections);
     if (!allowSet.has(s)) return;
     const found = NAV_ITEMS.find((n) => n.key === s);
     const parts = pathname.split("/").filter(Boolean);
@@ -439,6 +502,8 @@ export function AppShell(props: {
 
   function handleLogout() {
     localStorage.removeItem("currentAccount");
+    localStorage.removeItem(ROLE_PERMISSIONS_STORAGE_KEY);
+    localStorage.removeItem("sidebarOpen");
     router.replace("/login");
   }
 

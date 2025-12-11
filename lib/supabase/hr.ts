@@ -180,7 +180,7 @@ export async function fetchWorkConfigsFromSupabase(
   const { data, error } = await client
     .from("work_configs")
     .select(
-      "id,shift,standard_check_in,standard_check_out,late_grace_minutes,early_leave_grace_minutes,overtime_threshold_minutes"
+      "id,shift,name,standard_check_in,standard_check_out,late_grace_minutes,early_leave_grace_minutes,overtime_threshold_minutes"
     )
     .order("shift");
 

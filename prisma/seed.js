@@ -1,5 +1,6 @@
-import { PrismaClient } from "@prisma/client";
-import bcrypt from "bcryptjs";
+/* eslint-disable @typescript-eslint/no-require-imports */
+const { PrismaClient, SectionAction } = require("@prisma/client");
+const bcrypt = require("bcryptjs");
 
 const prisma = new PrismaClient();
 
@@ -28,6 +29,26 @@ const rolePermissions = {
   ACCOUNTANT: ["dashboard:view", "attendance:view", "employee:view"],
   SUPERVISOR: ["attendance:view", "attendance:edit", "employee:view"],
   EMPLOYEE: ["attendance:view"],
+};
+
+const sections = [
+  { key: "overview", label: "Tổng quan", path: "tong-quan", group: "core", sortOrder: 1, actions: [SectionAction.VIEW] },
+  { key: "departments", label: "Quản lý bộ phận", path: "quan-ly-bo-phan", group: "core", sortOrder: 2, actions: [SectionAction.VIEW, SectionAction.CREATE, SectionAction.UPDATE, SectionAction.DELETE] },
+  { key: "employeesOverview", label: "Tổng quan nhân viên", path: "quan-ly-nhan-vien/tong-quan-nhan-vien", group: "nhan-su", sortOrder: 3, actions: [SectionAction.VIEW] },
+  { key: "employees", label: "Danh sách nhân viên", path: "quan-ly-nhan-vien/danh-sach-nhan-vien", group: "nhan-su", sortOrder: 4, actions: [SectionAction.VIEW, SectionAction.CREATE, SectionAction.UPDATE, SectionAction.DELETE] },
+  { key: "employeeInfo", label: "Thông tin nhân viên", path: "quan-ly-nhan-vien/thong-tin-nhan-vien", group: "nhan-su", sortOrder: 5, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
+  { key: "employeeAccounts", label: "Quản lý tài khoản", path: "quan-ly-nhan-vien/quan-ly-tai-khoan", group: "nhan-su", sortOrder: 6, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
+  { key: "attendance", label: "Quản lý chấm công", path: "quan-ly-cham-cong", group: "cham-cong", sortOrder: 7, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
+  { key: "shiftOverview", label: "Tổng quan ca làm", path: "quan-ly-ca-lam/tong-quan-ca-lam", group: "cham-cong", sortOrder: 8, actions: [SectionAction.VIEW] },
+  { key: "shifts", label: "Ca làm", path: "quan-ly-ca-lam/ca-lam", group: "cham-cong", sortOrder: 9, actions: [SectionAction.VIEW, SectionAction.CREATE, SectionAction.UPDATE, SectionAction.DELETE] },
+  { key: "shiftAssignment", label: "Phân ca", path: "quan-ly-ca-lam/phan-ca", group: "cham-cong", sortOrder: 10, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
+  { key: "permissions", label: "Phân quyền", path: "quan-ly-chuc-vu/phan-quyen", group: "he-thong", sortOrder: 11, actions: [SectionAction.VIEW, SectionAction.MANAGE] },
+  { key: "roles", label: "Chức vụ", path: "quan-ly-chuc-vu/chuc-vu", group: "he-thong", sortOrder: 12, actions: [SectionAction.VIEW, SectionAction.CREATE, SectionAction.UPDATE, SectionAction.DELETE] },
+];
+
+const roleSectionAccess = {
+  // Admin/Director luôn full quyền (không cần lưu ở đây).
+  // Các role khác mặc định không có section nào; Admin/Director sẽ tự cấu hình.
 };
 
 const defaultPassword = "123456789";
@@ -87,6 +108,65 @@ async function upsertRolePermissions() {
   }
 }
 
+async function upsertSections() {
+  for (const section of sections) {
+    await prisma.appSection.upsert({
+      where: { key: section.key },
+      update: {
+        label: section.label,
+        path: section.path,
+        group: section.group,
+        sortOrder: section.sortOrder,
+        isEnabled: true,
+        actions: section.actions,
+      },
+      create: {
+        key: section.key,
+        label: section.label,
+        path: section.path,
+        group: section.group,
+        sortOrder: section.sortOrder,
+        isEnabled: true,
+        actions: section.actions,
+      },
+    });
+  }
+}
+
+async function upsertRoleSectionAccess() {
+  const sectionMap = new Map();
+  for (const s of sections) {
+    const existing = await prisma.appSection.findUnique({ where: { key: s.key } });
+    if (existing) sectionMap.set(s.key, existing);
+  }
+
+  for (const [roleKey, sectionKeys] of Object.entries(roleSectionAccess)) {
+    const role = await prisma.role.findUnique({ where: { key: roleKey } });
+    if (!role) continue;
+
+    for (const key of sectionKeys) {
+      const section = sectionMap.get(key);
+      if (!section) continue;
+      await prisma.roleSectionAccess.upsert({
+        where: {
+          roleId_sectionId: {
+            roleId: role.id,
+            sectionId: section.id,
+          },
+        },
+        update: {
+          allowedActions: section.actions?.length ? section.actions : [SectionAction.VIEW],
+        },
+        create: {
+          roleId: role.id,
+          sectionId: section.id,
+          allowedActions: section.actions?.length ? section.actions : [SectionAction.VIEW],
+        },
+      });
+    }
+  }
+}
+
 function buildAccountPayload(roleKey, fullName, email, password) {
   return {
     employeeCode: null,
@@ -120,11 +200,25 @@ async function upsertAccounts() {
   }
 }
 
+async function ensureAccountDetails() {
+  const accounts = await prisma.account.findMany({ select: { id: true } });
+  for (const acc of accounts) {
+    await prisma.accountDetail.upsert({
+      where: { accountId: acc.id },
+      update: {},
+      create: { accountId: acc.id },
+    });
+  }
+}
+
 async function main() {
   await upsertRoles();
   await upsertPermissions();
   await upsertRolePermissions();
+  await upsertSections();
+  await upsertRoleSectionAccess();
   await upsertAccounts();
+  await ensureAccountDetails();
 }
 
 main()

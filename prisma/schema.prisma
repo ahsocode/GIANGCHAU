@@ -23,6 +23,14 @@ enum LoginType {
   GOOGLE
 }
 
+enum SectionAction {
+  VIEW
+  CREATE
+  UPDATE
+  DELETE
+  MANAGE
+}
+
 model AttendanceRecord {
   id        Int     @id @default(autoincrement()) @map("id")
   accountId String  @map("account_id")
@@ -63,6 +71,7 @@ model Account {
   createdAt    DateTime       @default(now()) @map("created_at")
   detail       AccountDetail?
   attendance   AttendanceRecord[]
+  sectionOverrides AccountSectionOverride[]
 
   role Role? @relation(fields: [roleKey], references: [key])
 
@@ -120,6 +129,7 @@ model Role {
   isDirector  Boolean            @default(false) @map("is_director")
   accounts    Account[]
   permissions RolePermission[]
+  sectionAccess RoleSectionAccess[]
 
   @@map("roles")
 }
@@ -143,4 +153,57 @@ model RolePermission {
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
+}
+
+// Danh mục chức năng (dùng cho sidebar và phân quyền)
+model AppSection {
+  id         Int            @id @default(autoincrement())
+  key        String         @unique
+  label      String
+  path       String
+  group      String?
+  sortOrder  Int            @default(0) @map("sort_order")
+  isEnabled  Boolean        @default(true) @map("is_enabled")
+  actions    SectionAction[]
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt      @map("updated_at")
+
+  roleAccess        RoleSectionAccess[]
+  accountOverrides  AccountSectionOverride[]
+
+  @@map("app_sections")
+}
+
+// Quyền hiển thị + hành động theo role cho mỗi section
+model RoleSectionAccess {
+  id             Int            @id @default(autoincrement())
+  roleId         Int            @map("role_id")
+  sectionId      Int            @map("section_id")
+  allowedActions SectionAction[] @map("allowed_actions")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt      @map("updated_at")
+
+  role    Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  section AppSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, sectionId])
+  @@index([sectionId])
+  @@map("role_section_access")
+}
+
+// Override riêng cho tài khoản (tùy chọn)
+model AccountSectionOverride {
+  id             Int            @id @default(autoincrement())
+  accountId      String         @map("account_id")
+  sectionId      Int            @map("section_id")
+  allowedActions SectionAction[] @map("allowed_actions")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt      @map("updated_at")
+
+  account Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  section AppSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, sectionId])
+  @@index([sectionId])
+  @@map("account_section_overrides")
 }

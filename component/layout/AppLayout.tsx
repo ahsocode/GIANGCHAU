@@ -33,7 +33,7 @@ export function AppLayout(props: Props) {
     { key: "attendance", label: "Quản lý chấm công" },
     { key: "shifts", label: "Quản lý ca làm" },
   ];
-  const items = menuItems && menuItems.length ? menuItems : defaultMenu;
+  const items = menuItems !== undefined ? menuItems : defaultMenu;
   const formatNow = () => {
     const d = new Date();
     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
@@ -46,8 +46,22 @@ export function AppLayout(props: Props) {
   };
 
   const [now, setNow] = useState<string>("");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [employeeMenuOpen, setEmployeeMenuOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const stored = localStorage.getItem("sidebarOpen");
+    if (stored === "false") return false;
+    if (stored === "true") return true;
+    return true;
+  });
+  const [employeeMenuOpen, setEmployeeMenuOpen] = useState(() =>
+    section === "employees" || section === "employeesOverview"
+  );
+  const [roleMenuOpen, setRoleMenuOpen] = useState(() =>
+    section === "roles" || section === "permissions"
+  );
+  const [shiftMenuOpen, setShiftMenuOpen] = useState(() =>
+    section === "shiftOverview" || section === "shifts" || section === "shiftAssignment"
+  );
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -56,21 +70,58 @@ export function AppLayout(props: Props) {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("sidebarOpen", sidebarOpen ? "true" : "false");
+  }, [sidebarOpen]);
+
   const employeeKeys = new Set<DirectorSection>([
     "employeesOverview",
     "employees",
+    "employeeInfo",
+    "employeeAccounts",
   ]);
   const employeeItems = items.filter((i) => employeeKeys.has(i.key));
   const firstEmployeeIndex = items.findIndex((i) => employeeKeys.has(i.key));
   const isEmployeeSection =
-    section === "employees" || section === "employeesOverview";
+    section === "employees" || section === "employeesOverview" || section === "employeeInfo";
+
+  const roleKeys = new Set<DirectorSection>(["roles", "permissions"]);
+  const roleItems = items.filter((i) => roleKeys.has(i.key));
+  const firstRoleIndex = items.findIndex((i) => roleKeys.has(i.key));
+  const isRoleSection = section === "roles" || section === "permissions";
+
+  const shiftKeys = new Set<DirectorSection>([
+    "shiftOverview",
+    "shifts",
+    "shiftAssignment",
+  ]);
+  const shiftItems = items.filter((i) => shiftKeys.has(i.key));
+  const firstShiftIndex = items.findIndex((i) => shiftKeys.has(i.key));
+  const isShiftSection =
+    section === "shiftOverview" ||
+    section === "shifts" ||
+    section === "shiftAssignment";
 
   useEffect(() => {
-    setEmployeeMenuOpen(isEmployeeSection);
-  }, [isEmployeeSection]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isEmployeeSection && !employeeMenuOpen) setEmployeeMenuOpen(true);
+  }, [isEmployeeSection, employeeMenuOpen]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isRoleSection && !roleMenuOpen) setRoleMenuOpen(true);
+  }, [isRoleSection, roleMenuOpen]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isShiftSection && !shiftMenuOpen) setShiftMenuOpen(true);
+  }, [isShiftSection, shiftMenuOpen]);
 
   const handleNavigateItem = (key: DirectorSection) => {
     if (!employeeKeys.has(key)) setEmployeeMenuOpen(false);
+    if (!roleKeys.has(key)) setRoleMenuOpen(false);
+    if (!shiftKeys.has(key)) setShiftMenuOpen(false);
     onNavigate(key);
   };
 
@@ -124,67 +175,178 @@ export function AppLayout(props: Props) {
           <nav className="flex-1 px-4 py-5 space-y-1.5 text-sm overflow-y-auto">
             {items.map((item, idx) => {
               const isEmployee = employeeKeys.has(item.key);
-              if (!isEmployee) {
+              const isRole = roleKeys.has(item.key);
+              const isShift = shiftKeys.has(item.key);
+
+              if (isEmployee) {
+                if (idx !== firstEmployeeIndex) return null;
+
                 return (
-                  <SidebarItem
-                    key={item.key}
-                    label={item.label}
-                    active={section === item.key}
-                    onClick={() => handleNavigateItem(item.key)}
-                  />
+                  <div key="employee-group" className="pt-1">
+                    <button
+                      onClick={() => setEmployeeMenuOpen((v) => !v)}
+                      className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isEmployeeSection
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "text-slate-700 hover:bg-slate-100"
+                      }`}
+                      aria-expanded={employeeMenuOpen}
+                      aria-controls="employee-nav"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                        <span>Quản lý nhân viên</span>
+                      </div>
+                      <svg
+                        className={`w-4 h-4 transition-transform duration-200 ${
+                          employeeMenuOpen ? "rotate-180" : ""
+                        }`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    <div
+                      id="employee-nav"
+                      className={`overflow-hidden transition-all duration-300 ${
+                        employeeMenuOpen ? "max-h-40 mt-1.5" : "max-h-0"
+                      }`}
+                    >
+                      <div className="space-y-1 pl-3 border-l-2 border-blue-200 ml-5">
+                        {employeeItems.map((child) => (
+                          <SidebarItem
+                            key={child.key}
+                            label={child.label}
+                            active={section === child.key}
+                            onClick={() => handleNavigateItem(child.key)}
+                            isSubItem
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 );
               }
 
-              if (idx !== firstEmployeeIndex) return null;
+              if (isRole) {
+                if (idx !== firstRoleIndex) return null;
 
-              return (
-                <div key="employee-group" className="pt-1">
-                  <button
-                    onClick={() => setEmployeeMenuOpen((v) => !v)}
-                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                      isEmployeeSection
-                        ? "bg-blue-600 text-white shadow-md"
-                        : "text-slate-700 hover:bg-slate-100"
-                    }`}
-                    aria-expanded={employeeMenuOpen}
-                    aria-controls="employee-nav"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                      </svg>
-                      <span>Quản lý nhân viên</span>
-                    </div>
-                    <svg
-                      className={`w-4 h-4 transition-transform duration-200 ${
-                        employeeMenuOpen ? "rotate-180" : ""
+                return (
+                  <div key="role-group" className="pt-1">
+                    <button
+                      onClick={() => setRoleMenuOpen((v) => !v)}
+                      className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isRoleSection
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "text-slate-700 hover:bg-slate-100"
                       }`}
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
+                      aria-expanded={roleMenuOpen}
+                      aria-controls="role-nav"
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  <div
-                    id="employee-nav"
-                    className={`overflow-hidden transition-all duration-300 ${
-                      employeeMenuOpen ? "max-h-40 mt-1.5" : "max-h-0"
-                    }`}
-                  >
-                    <div className="space-y-1 pl-3 border-l-2 border-blue-200 ml-5">
-                      {employeeItems.map((child) => (
-                        <SidebarItem
-                          key={child.key}
-                          label={child.label}
-                          active={section === child.key}
-                          onClick={() => handleNavigateItem(child.key)}
-                          isSubItem
-                        />
-                      ))}
+                      <div className="flex items-center gap-2.5">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2-2-.895-2-2zm-7 0c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2-2-.895-2-2zm7 6c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2-2-.895-2-2zm-7 0c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2-2-.895-2-2z" />
+                        </svg>
+                        <span>Quản lý chức vụ</span>
+                      </div>
+                      <svg
+                        className={`w-4 h-4 transition-transform duration-200 ${
+                          roleMenuOpen ? "rotate-180" : ""
+                        }`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    <div
+                      id="role-nav"
+                      className={`overflow-hidden transition-all duration-300 ${
+                        roleMenuOpen ? "max-h-32 mt-1.5" : "max-h-0"
+                      }`}
+                    >
+                      <div className="space-y-1 pl-3 border-l-2 border-blue-200 ml-5">
+                        {roleItems.map((child) => (
+                          <SidebarItem
+                            key={child.key}
+                            label={child.label}
+                            active={section === child.key}
+                            onClick={() => handleNavigateItem(child.key)}
+                            isSubItem
+                          />
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
+                );
+              }
+
+              if (isShift) {
+                if (idx !== firstShiftIndex) return null;
+
+                return (
+                  <div key="shift-group" className="pt-1">
+                    <button
+                      onClick={() => setShiftMenuOpen((v) => !v)}
+                      className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isShiftSection
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "text-slate-700 hover:bg-slate-100"
+                      }`}
+                      aria-expanded={shiftMenuOpen}
+                      aria-controls="shift-nav"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8h18M3 16h18M7 4h2m6 0h2m-8 16h2m6 0h2" />
+                        </svg>
+                      <span>Quản lý ca làm</span>
+                      </div>
+                      <svg
+                        className={`w-4 h-4 transition-transform duration-200 ${
+                          shiftMenuOpen ? "rotate-180" : ""
+                        }`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    <div
+                      id="shift-nav"
+                      className={`overflow-hidden transition-all duration-300 ${
+                        shiftMenuOpen ? "max-h-40 mt-1.5" : "max-h-0"
+                      }`}
+                    >
+                      <div className="space-y-1 pl-3 border-l-2 border-blue-200 ml-5">
+                        {shiftItems.map((child) => (
+                          <SidebarItem
+                            key={child.key}
+                            label={child.label}
+                            active={section === child.key}
+                            onClick={() => handleNavigateItem(child.key)}
+                            isSubItem
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <SidebarItem
+                  key={item.key}
+                  label={item.label}
+                  active={section === item.key}
+                  onClick={() => handleNavigateItem(item.key)}
+                />
               );
             })}
           </nav>

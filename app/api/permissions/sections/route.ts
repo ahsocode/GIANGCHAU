@@ -4,14 +4,8 @@ import { prisma, isPrismaEnabled } from "@/lib/prisma/client";
 
 // Prisma client có thể chưa sinh model appSection trên môi trường build hiện tại,
 // dùng cast any để tránh lỗi type khi compile.
-const db = prisma as unknown as {
-  appSection: {
-    findMany: typeof prisma.appSection.findMany;
-  };
-  role: typeof prisma.role;
-  roleSectionAccess: typeof prisma.roleSectionAccess;
-  $transaction: typeof prisma.$transaction;
-};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db: any = prisma;
 
 const LOCKED_ROLES = new Set(["ADMIN", "DIRECTOR"]);
 
@@ -45,17 +39,17 @@ export async function GET() {
     }),
   ]);
 
-  const allKeys = sections.map((s) => s.key as DirectorSection);
+  const allKeys = sections.map((s: { key: string }) => s.key as DirectorSection);
   const roleAccess: Record<string, DirectorSection[]> = {};
 
-  roles.forEach((r) => {
+  roles.forEach((r: { key?: string | null }) => {
     const upper = (r.key || "").toUpperCase();
     if (LOCKED_ROLES.has(upper)) {
       roleAccess[upper] = allKeys;
     }
   });
 
-  access.forEach((a) => {
+  access.forEach((a: { role?: { key?: string | null }; section?: { key?: string | null } }) => {
     const key = (a.role?.key || "").toUpperCase();
     if (!key || LOCKED_ROLES.has(key)) return;
     const sectionKey = a.section?.key as DirectorSection | undefined;
@@ -95,14 +89,14 @@ export async function PUT(req: Request) {
   const allSections = await db.appSection.findMany({
     where: { key: { in: sections } },
   });
-  const sectionIdByKey = new Map(allSections.map((s) => [s.key, s.id]));
+  const sectionIdByKey = new Map(allSections.map((s: { key: string; id: number }) => [s.key, s.id]));
   if (!sectionIdByKey.size) return badRequest("Không có section hợp lệ");
 
   const targetIds = sections
     .map((k) => sectionIdByKey.get(k))
     .filter((v) => typeof v === "number") as number[];
 
-  await db.$transaction(async (tx) => {
+  await db.$transaction(async (tx: any) => {
     await tx.roleSectionAccess.deleteMany({
       where: {
         roleId: role.id,

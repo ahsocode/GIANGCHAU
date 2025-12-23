@@ -63,8 +63,20 @@ function EmployeeInfoContent({
   const [deptMaster, setDeptMaster] = useState<SelectOption[]>([]);
   const [shiftMaster, setShiftMaster] = useState<SelectOption[]>([]);
   const [shiftMap, setShiftMap] = useState<Map<string, string>>(new Map());
+  const [dataInitialized, setDataInitialized] = useState(false);
+
+  // Khởi tạo dữ liệu từ fallback ngay lập tức
+  useEffect(() => {
+    if (!dataInitialized && fallbackEmployees.length > 0) {
+      setRows(fallbackEmployees);
+      setTotal(fallbackEmployees.length);
+      setDataInitialized(true);
+      setLoading(false);
+    }
+  }, [fallbackEmployees, dataInitialized]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
+  
   const roleOptions = useMemo(() => {
     const map = new Map<string, string>();
     rows.forEach((r) => {
@@ -74,6 +86,7 @@ function EmployeeInfoContent({
     });
     return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
   }, [rows]);
+
   const deptOptions = useMemo(() => {
     const map = new Map<string, string>();
     [...deptMaster, ...rows.map((r) => r.department || "")]
@@ -112,6 +125,7 @@ function EmployeeInfoContent({
     return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
   }, [rows, shiftMaster, workConfigs]);
 
+  // Load từ API - chỉ chạy sau khi init
   useEffect(() => {
     const controller = new AbortController();
     async function load() {
@@ -128,23 +142,28 @@ function EmployeeInfoContent({
         if (employmentType) params.set("employmentType", employmentType);
         if (department) params.set("department", department);
         if (shiftCode) params.set("shiftCode", shiftCode);
+        
         const res = await fetch(`/api/employees/info?${params.toString()}`, { signal: controller.signal });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Không tải được danh sách nhân viên");
         }
         const data: ApiResponse = await res.json();
-        if ((data.items || []).length === 0 && fallbackEmployees.length) {
+        
+        // Chỉ update nếu có dữ liệu từ API
+        if (data.items && data.items.length > 0) {
+          setRows(data.items);
+          setTotal(data.total || 0);
+        } else if (!dataInitialized && fallbackEmployees.length > 0) {
           setRows(fallbackEmployees);
           setTotal(fallbackEmployees.length);
-        } else {
-          setRows(data.items || []);
-          setTotal(data.total || 0);
         }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         const msg = err instanceof Error ? err.message : "Lỗi không xác định";
-        if (fallbackEmployees.length) {
+        
+        // Khi có lỗi, giữ dữ liệu hiện tại
+        if (rows.length === 0 && fallbackEmployees.length > 0) {
           setRows(fallbackEmployees);
           setTotal(fallbackEmployees.length);
         } else {
@@ -154,16 +173,60 @@ function EmployeeInfoContent({
         setLoading(false);
       }
     }
-    load();
+    
+    // Chỉ load từ API sau khi đã init
+    if (dataInitialized) {
+      load();
+    }
+    
     return () => controller.abort();
-  }, [page, pageSize, sortBy, sortDir, roleKey, employmentType, department, shiftCode, fallbackEmployees]);
+  }, [page, pageSize, sortBy, sortDir, roleKey, employmentType, department, shiftCode, dataInitialized, fallbackEmployees, rows.length]);
+
+  const sortedRows = useMemo(() => rows, [rows]);
+
+  const shiftNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    workConfigs.forEach((c) => map.set(String(c.shift), c.name || `Ca ${c.shift}`));
+    shiftOptions.forEach((opt) => {
+      const val = typeof opt === "string" ? opt : opt.value;
+      const label = typeof opt === "string" ? opt : opt.label || opt.value;
+      if (val && !map.has(String(val))) map.set(String(val), label);
+    });
+    [...rows, ...fallbackEmployees].forEach((e) => {
+      if (e.shiftCode) {
+        const key = String(e.shiftCode);
+        if (!map.has(key)) map.set(key, `Ca ${key}`);
+      }
+    });
+    return map;
+  }, [workConfigs, shiftOptions, rows, fallbackEmployees]);
 
   useEffect(() => {
-    if (!rows.length && fallbackEmployees.length) {
-      setRows(fallbackEmployees);
-      setTotal(fallbackEmployees.length);
+    if (shiftNameMap.size) {
+      setShiftMap(shiftNameMap);
     }
-  }, [fallbackEmployees, rows.length]);
+  }, [shiftNameMap]);
+
+  useEffect(() => {
+    async function loadShifts() {
+      if (shiftMap.size || !isSupabaseEnabled()) return;
+      try {
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase.from("work_configs").select("shift,name");
+        if (!error && Array.isArray(data)) {
+          const map = new Map<string, string>();
+          data.forEach((c: { shift: number | string | null; name?: string | null }) => {
+            const key = c.shift != null ? String(c.shift) : "";
+            if (key) map.set(key, c.name || `Ca ${key}`);
+          });
+          if (map.size) setShiftMap(map);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadShifts();
+  }, [shiftMap]);
 
   // Load master data for department & shifts (for dropdowns)
   useEffect(() => {
@@ -253,52 +316,6 @@ function EmployeeInfoContent({
     loadMaster();
     return () => controller.abort();
   }, []);
-
-  const sortedRows = useMemo(() => rows, [rows]);
-
-  const shiftNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    workConfigs.forEach((c) => map.set(String(c.shift), c.name || `Ca ${c.shift}`));
-    shiftOptions.forEach((opt) => {
-      const val = typeof opt === "string" ? opt : opt.value;
-      const label = typeof opt === "string" ? opt : opt.label || opt.value;
-      if (val && !map.has(String(val))) map.set(String(val), label);
-    });
-    [...rows, ...fallbackEmployees].forEach((e) => {
-      if (e.shiftCode) {
-        const key = String(e.shiftCode);
-        if (!map.has(key)) map.set(key, `Ca ${key}`);
-      }
-    });
-    return map;
-  }, [workConfigs, shiftOptions, rows, fallbackEmployees]);
-
-  useEffect(() => {
-    if (shiftNameMap.size) {
-      setShiftMap(shiftNameMap);
-    }
-  }, [shiftNameMap]);
-
-  useEffect(() => {
-    async function loadShifts() {
-      if (shiftMap.size || !isSupabaseEnabled()) return;
-      try {
-        const supabase = getSupabaseClient();
-        const { data, error } = await supabase.from("work_configs").select("shift,name");
-        if (!error && Array.isArray(data)) {
-          const map = new Map<string, string>();
-          data.forEach((c: { shift: number | string | null; name?: string | null }) => {
-            const key = c.shift != null ? String(c.shift) : "";
-            if (key) map.set(key, c.name || `Ca ${key}`);
-          });
-          if (map.size) setShiftMap(map);
-        }
-      } catch {
-        // ignore
-      }
-    }
-    loadShifts();
-  }, [shiftMap]);
 
   const handleSave = async (draft: Partial<Employee> & { code: string }) => {
     setSaving(true);
@@ -493,6 +510,7 @@ function EmployeeInfoContent({
                 <th className="px-3 py-2 text-left font-medium">Chức vụ</th>
                 <th className="px-3 py-2 text-left font-medium">Loại</th>
                 <th className="px-3 py-2 text-left font-medium">Bộ phận</th>
+                <th className="px-3 py-2 text-left font-medium">Ca làm</th>
                 <th className="px-3 py-2 text-left font-medium">Ngày vào làm</th>
                 <th className="px-3 py-2 text-left font-medium">Trạng thái</th>
                 <th className="px-3 py-2 text-left font-medium">Số điện thoại</th>
@@ -501,21 +519,21 @@ function EmployeeInfoContent({
               </tr>
             </thead>
             <tbody>
-              {loading && (
+              {loading && sortedRows.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-3 py-4 text-center text-slate-400">
+                  <td colSpan={11} className="px-3 py-4 text-center text-slate-400">
                     Đang tải dữ liệu...
                   </td>
                 </tr>
               )}
               {!loading && sortedRows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-4 text-center text-slate-400">
+                  <td colSpan={11} className="px-3 py-4 text-center text-slate-400">
                     Chưa có dữ liệu nhân viên.
                   </td>
                 </tr>
               )}
-              {!loading && sortedRows.map((e) => (
+              {sortedRows.map((e) => (
                 <tr key={e.code} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-3 py-2">{e.code}</td>
                   <td className="px-3 py-2">{e.name}</td>

@@ -27,6 +27,7 @@ type AccountRow = {
   email?: string | null;
   phone?: string | null;
   role?: string | null;
+  roleKey?: string | null;
   roleName?: string | null;
   loginType?: string | null;
   isActive?: boolean | null;
@@ -34,7 +35,7 @@ type AccountRow = {
 };
 
 function mapAccount(row: AccountRow) {
-  const roleKey = (row.role || "").toUpperCase();
+  const roleKey = ((row.role || row.roleKey) || "").toUpperCase();
   return {
     id: row.id,
     code: row.employeeCode || "",
@@ -59,27 +60,28 @@ export async function GET(req: Request) {
   const sortBy = (searchParams.get("sortBy") || "").toLowerCase(); // createdAt | name | role
   const sortDir = (searchParams.get("sortDir") || "").toLowerCase() === "desc" ? "desc" : "asc";
 
-  const baseWhere: Record<string, unknown> = {
-    NOT: { roleKey: "ADMIN" },
-  };
-  if (roleKey) baseWhere.roleKey = roleKey;
-  if (status === "active") baseWhere.isActive = true;
-  if (status === "inactive") baseWhere.isActive = false;
-  if (search) {
-    baseWhere.OR = [
-      { fullName: { contains: search, mode: "insensitive" } },
-      { email: { contains: search, mode: "insensitive" } },
-      { employeeCode: { contains: search, mode: "insensitive" } },
-    ];
-  }
-
-  let orderBy: Record<string, string> = { createdAt: "desc" };
-  if (sortBy === "name") orderBy = { fullName: sortDir };
-  else if (sortBy === "role") orderBy = { roleKey: sortDir };
-  else if (sortBy === "createdat") orderBy = { createdAt: sortDir };
-
+  // Thử Prisma trước
   if (isPrismaEnabled()) {
     try {
+      const baseWhere: Record<string, unknown> = {
+        NOT: { roleKey: "ADMIN" },
+      };
+      if (roleKey) baseWhere.roleKey = roleKey;
+      if (status === "active") baseWhere.isActive = true;
+      if (status === "inactive") baseWhere.isActive = false;
+      if (search) {
+        baseWhere.OR = [
+          { fullName: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+          { employeeCode: { contains: search, mode: "insensitive" } },
+        ];
+      }
+
+      let orderBy: Record<string, string> = { createdAt: "desc" };
+      if (sortBy === "name") orderBy = { fullName: sortDir };
+      else if (sortBy === "role") orderBy = { roleKey: sortDir };
+      else if (sortBy === "createdat") orderBy = { createdAt: sortDir };
+
       const [items, total] = await Promise.all([
         prisma.account.findMany({
           where: baseWhere,
@@ -95,7 +97,17 @@ export async function GET(req: Request) {
           page,
           pageSize,
           total,
-          items: items.map(mapAccount),
+          items: items.map((item) => mapAccount({
+            id: item.id,
+            employeeCode: item.employeeCode,
+            fullName: item.fullName,
+            email: item.email,
+            phone: item.phone,
+            roleKey: item.roleKey,
+            loginType: item.loginType,
+            isActive: item.isActive,
+            createdAt: item.createdAt,
+          })),
         });
       }
     } catch (err: unknown) {
@@ -103,6 +115,7 @@ export async function GET(req: Request) {
     }
   }
 
+  // Fallback Supabase
   if (isSupabaseEnabled()) {
     try {
       const supabase = getSupabaseClient();

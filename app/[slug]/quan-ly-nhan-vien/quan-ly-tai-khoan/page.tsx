@@ -82,6 +82,44 @@ function AccountManager() {
     return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
   }, [rows]);
 
+  const [dataInitialized, setDataInitialized] = useState(false);
+
+  // Khởi tạo dữ liệu từ cache Supabase nếu có (fallback)
+  useEffect(() => {
+    async function initFromSupabase() {
+      if (!isSupabaseEnabled() || dataInitialized || rows.length) return;
+      try {
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+          .from("accounts")
+          .select("id, employee_code, full_name, email, phone, role, login_type, is_active, created_at");
+        if (error) throw new Error(error.message);
+        const mapped =
+          (data || []).map((row: Record<string, unknown>) => ({
+            id: String(row.id || ""),
+            code: String(row.employee_code || ""),
+            name: String(row.full_name || ""),
+            email: String(row.email || ""),
+            phone: String(row.phone || ""),
+            roleKey: String(row.role || "").toUpperCase(),
+            roleName: String(row.role_name || ROLE_LABELS[String(row.role || "").toUpperCase()] || row.role || ""),
+            loginType: String(row.login_type || "LOCAL"),
+            isActive: Boolean(row.is_active ?? true),
+            createdAt: row.created_at as string | undefined,
+          })) || [];
+        if (mapped.length) {
+          setRows(mapped);
+          setTotal(mapped.length);
+        }
+      } catch {
+        // ignore init errors
+      } finally {
+        setDataInitialized(true);
+      }
+    }
+    initFromSupabase();
+  }, [dataInitialized, rows.length]);
+
   useEffect(() => {
     const controller = new AbortController();
     async function load() {
@@ -93,32 +131,22 @@ function AccountManager() {
           const supabase = getSupabaseClient();
           const { data, error } = await supabase
             .from("accounts")
-            .select("id, employee_code, full_name, email, phone, role, role_name, login_type, is_active, created_at");
+            .select("id, employee_code, full_name, email, phone, role, login_type, is_active, created_at");
           if (error) throw new Error(error.message);
-          type SupabaseAccountRow = {
-            id: string;
-            employee_code?: string | null;
-            full_name?: string | null;
-            email?: string | null;
-            phone?: string | null;
-            role?: string | null;
-            role_name?: string | null;
-            login_type?: string | null;
-            is_active?: boolean | null;
-            created_at?: string | null;
-          };
           const mapped =
-            (data || []).map((row: SupabaseAccountRow) => ({
-              id: row.id,
-              code: row.employee_code || "",
-              name: row.full_name || "",
-              email: row.email || "",
-              phone: row.phone || "",
-              roleKey: (row.role || "").toUpperCase(),
-              roleName: row.role_name || ROLE_LABELS[(row.role || "").toUpperCase()] || row.role || "",
-              loginType: row.login_type || "LOCAL",
-              isActive: row.is_active ?? true,
-              createdAt: row.created_at,
+            (data || []).map((row: Record<string, unknown>) => ({
+              id: String(row.id || ""),
+              code: String(row.employee_code || ""),
+              name: String(row.full_name || ""),
+              email: String(row.email || ""),
+              phone: String(row.phone || ""),
+              roleKey: String(row.role || "").toUpperCase(),
+              roleName: String(
+                row.role_name || ROLE_LABELS[String(row.role || "").toUpperCase()] || row.role || ""
+              ),
+              loginType: String(row.login_type || "LOCAL"),
+              isActive: Boolean(row.is_active ?? true),
+              createdAt: row.created_at as string | undefined,
             })) || [];
 
           const filtered = mapped
@@ -182,7 +210,7 @@ function AccountManager() {
           throw new Error(data.error || "Không tải được danh sách tài khoản");
         }
         const data: ApiResponse = await res.json();
-        if ((data.items || []).length) {
+        if (data.items && data.items.length) {
           setRows(data.items || []);
           setTotal(data.total || 0);
         } else {

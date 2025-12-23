@@ -8,6 +8,7 @@ import { prisma, isPrismaEnabled } from "@/lib/prisma/client";
 const db: any = prisma;
 
 const LOCKED_ROLES = new Set(["ADMIN", "DIRECTOR"]);
+const ALLOWED_ACTIONS = new Set(["VIEW", "CREATE", "UPDATE", "DELETE", "MANAGE"]);
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -127,4 +128,53 @@ export async function PUT(req: Request) {
     role: roleKey,
     sections: sections as DirectorSection[],
   });
+}
+
+export async function POST(req: Request) {
+  if (!isPrismaEnabled()) {
+    return NextResponse.json(
+      { error: "Prisma chưa được cấu hình" },
+      { status: 500 }
+    );
+  }
+
+  const body = await req.json().catch(() => null);
+  const requesterRole = (body?.role || "").toUpperCase();
+  if (requesterRole !== "ADMIN") return unauthorized("Chỉ Admin được phép thêm chức năng mới");
+
+  const rawKey = (body?.key || "").trim();
+  const label = (body?.label || "").trim();
+  const pathInput = (body?.path || "").trim();
+  const group = (body?.group || "").trim();
+  const sortOrderRaw = Number(body?.sortOrder);
+
+  if (!rawKey) return badRequest("Thiếu key chức năng");
+  if (!label) return badRequest("Thiếu tên hiển thị");
+  if (!pathInput) return badRequest("Thiếu path điều hướng");
+
+  const key = rawKey.replace(/\s+/g, "_");
+  const path = pathInput.replace(/^\//, "");
+  const sortOrder = Number.isFinite(sortOrderRaw) ? sortOrderRaw : 0;
+
+  const actionsInput = Array.isArray(body?.actions) ? body.actions : [];
+  const actions = actionsInput
+    .map((a: unknown) => String(a || "").toUpperCase())
+    .filter((a: string) => ALLOWED_ACTIONS.has(a));
+
+  const existing = await db.appSection.findUnique({ where: { key } });
+  if (existing) return badRequest("Key chức năng đã tồn tại");
+
+  const created = await db.appSection.create({
+    data: {
+      key,
+      label,
+      path,
+      group: group || null,
+      sortOrder,
+      actions: actions.length ? actions : ["VIEW"],
+      isEnabled: true,
+    },
+  });
+
+  return NextResponse.json({ section: created });
 }

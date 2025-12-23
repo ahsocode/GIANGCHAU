@@ -1,23 +1,27 @@
 import type { AttendanceRecord, Employee } from "@/lib/hr-types";
 
-export type DirectorSection =
-  | "overview"
-  | "employeesOverview"
-  | "employees"
-  | "employeeInfo"
-  | "employeeAccounts"
-  | "attendanceOverview"
-  | "attendanceDailyReport"
-  | "attendanceWeeklyReport"
-  | "attendanceMonthlyReport"
-  | "attendanceEdit"
-  | "shiftOverview"
-  | "shifts"
-  | "shiftAssignment"
-  | "departments"
-  | "factories"
-  | "roles"
-  | "permissions";
+// Cho phép thêm chức năng động: key section là string tự do, không giới hạn ở danh sách cũ.
+export type DirectorSection = string;
+export const DEFAULT_SECTION_KEYS = [
+  "overview",
+  "employeesOverview",
+  "employees",
+  "employeeInfo",
+  "employeeAccounts",
+  "attendanceOverview",
+  "attendanceDailyReport",
+  "attendanceWeeklyReport",
+  "attendanceMonthlyReport",
+  "attendanceEdit",
+  "shiftOverview",
+  "shifts",
+  "shiftAssignment",
+  "departments",
+  "factories",
+  "roles",
+  "permissions",
+] as const;
+export type KnownDirectorSection = (typeof DEFAULT_SECTION_KEYS)[number];
 
 export type WorkConfig = {
   standardCheckIn: string; // "08:00"

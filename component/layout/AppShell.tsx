@@ -32,9 +32,9 @@ type WorkShift = {
   shift: number;
 };
 
-type NavItem = { key: DirectorSection; label: string; path: string };
+type NavItem = { key: DirectorSection; label: string; path: string; group?: string | null };
 
-const NAV_ITEMS: NavItem[] = [
+const FALLBACK_NAV_ITEMS: NavItem[] = [
   { key: "overview", label: "Tổng quan", path: "tong-quan" },
   { key: "departments", label: "Quản lý bộ phận", path: "quan-ly-bo-phan" },
   {
@@ -89,38 +89,37 @@ const NAV_ITEMS: NavItem[] = [
   { key: "roles", label: "Chức vụ", path: "quan-ly-chuc-vu/chuc-vu" },
 ];
 
-const ALL_KEYS = NAV_ITEMS.map((i) => i.key);
-
 const ROLE_SECTIONS: Record<string, DirectorSection[]> = {
-  ADMIN: ALL_KEYS,
-  DIRECTOR: ALL_KEYS,
+  ADMIN: [],
+  DIRECTOR: [],
   ...DEFAULT_ROLE_SECTIONS,
 };
 
 function resolveSections(
   roleKey?: string,
   custom?: string[],
-  overrides?: Record<string, DirectorSection[]>
+  overrides?: Record<string, DirectorSection[]>,
+  allKeys: DirectorSection[] = [],
+  navItems: NavItem[] = []
 ): DirectorSection[] {
   const upper = (roleKey || "").toUpperCase();
-  if (upper === "ADMIN" || upper === "DIRECTOR") return ALL_KEYS;
+  if (upper === "ADMIN" || upper === "DIRECTOR") return allKeys;
 
+  const lowerToKey = new Map(navItems.map((n) => [String(n.key).toLowerCase(), n.key]));
   const cleanedCustom = (custom || [])
-    .map((k) => (k || "").toLowerCase())
-    .filter(Boolean);
+    .map((k) => lowerToKey.get(String(k || "").toLowerCase()))
+    .filter(Boolean) as DirectorSection[];
   if (cleanedCustom.length) {
-    const set = new Set(cleanedCustom);
-    const filtered = NAV_ITEMS.filter((n) => set.has(n.key.toLowerCase())).map((n) => n.key);
-    if (filtered.length) return filtered;
+    return cleanedCustom;
   }
 
   const override = overrides?.[upper];
   if (override && override.length) {
-    return sanitizeRoleSections(upper, override, ALL_KEYS);
+    return sanitizeRoleSections(upper, override, allKeys);
   }
 
   const defaults = ROLE_SECTIONS[upper];
-  if (defaults && defaults.length) return defaults;
+  if (defaults && defaults.length) return sanitizeRoleSections(upper, defaults, allKeys);
 
   return [];
 }
@@ -163,6 +162,7 @@ export function AppShell(props: {
   const [accountSections, setAccountSections] = useState<string[] | undefined>(undefined);
   const [roleOverrides, setRoleOverrides] = useState<Record<string, DirectorSection[]>>({});
   const [allowedSections, setAllowedSections] = useState<DirectorSection[]>([]);
+  const [navItems, setNavItems] = useState<NavItem[]>(FALLBACK_NAV_ITEMS);
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -187,6 +187,11 @@ export function AppShell(props: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const allSectionKeys = useMemo(
+    () => navItems.map((i) => i.key),
+    [navItems]
+  );
+
   function applyWorkConfigs(cfgs: WorkConfigRecord[]) {
     setWorkConfigs(cfgs);
     if (!cfgs.length) return;
@@ -196,8 +201,8 @@ export function AppShell(props: {
       cfgs[0].shift
     );
 
-  const defaultShiftId = String(minShift);
-  setActiveShiftId(defaultShiftId);
+    const defaultShiftId = String(minShift);
+    setActiveShiftId(defaultShiftId);
 
     const activeCfg =
       cfgs.find((c) => String(c.shift) === defaultShiftId) || cfgs[0];
@@ -242,14 +247,14 @@ export function AppShell(props: {
           ? acc.permissions
           : undefined;
       setAccountSections(customSections);
-      setAllowedSections(resolveSections(resolvedRole, customSections, roleOverrides));
+      setAllowedSections(resolveSections(resolvedRole, customSections, roleOverrides, allSectionKeys, navItems));
     } catch {
       setAccountName("Người dùng");
       setRoleKey("DIRECTOR");
       setAccountSections(undefined);
-      setAllowedSections(resolveSections("DIRECTOR", undefined, roleOverrides));
+      setAllowedSections(resolveSections("DIRECTOR", undefined, roleOverrides, allSectionKeys, navItems));
     }
-  }, [router, roleOverrides]);
+  }, [router, roleOverrides, navItems, allSectionKeys]);
 
   useEffect(() => {
     async function loadRoleAccess() {
@@ -257,22 +262,32 @@ export function AppShell(props: {
         const res = await fetch("/api/permissions/sections", { cache: "no-store" });
         if (!res.ok) throw new Error("Không tải được cấu hình phân quyền");
         const data = await res.json();
+        if (Array.isArray(data?.sections) && data.sections.length) {
+          setNavItems(
+            data.sections.map((s: NavItem) => ({
+              key: s.key,
+              label: s.label,
+              path: String(s.path || "").replace(/^\//, ""),
+              group: s.group ?? null,
+            }))
+          );
+        }
         if (data?.roleAccess) {
           setRoleOverrides(data.roleAccess);
-          return;
         }
       } catch (err) {
         console.warn("Không tải được roleAccess từ API, dùng fallback localStorage.", err);
+        setNavItems(FALLBACK_NAV_ITEMS);
       }
-      setRoleOverrides(loadRolePermissions());
+      setRoleOverrides((prev) => Object.keys(prev).length ? prev : loadRolePermissions());
     }
 
     loadRoleAccess();
   }, []);
 
   useEffect(() => {
-    setAllowedSections(resolveSections(roleKey, accountSections, roleOverrides));
-  }, [roleKey, accountSections, roleOverrides]);
+    setAllowedSections(resolveSections(roleKey, accountSections, roleOverrides, allSectionKeys, navItems));
+  }, [roleKey, accountSections, roleOverrides, allSectionKeys, navItems]);
 
   // Load data
   useEffect(() => {
@@ -329,15 +344,15 @@ export function AppShell(props: {
   }, [activeShiftId, workConfigs]);
 
   const effectiveSections = useMemo(() => {
-    const base = allowedSections.length ? [...allowedSections] : ALL_KEYS;
+    const base = allowedSections.length ? [...allowedSections] : allSectionKeys;
     if (!base.includes(activeSection)) base.push(activeSection);
     return base;
-  }, [allowedSections, activeSection]);
+  }, [allowedSections, activeSection, allSectionKeys]);
 
   const menuItems = useMemo(() => {
     const allowSet = new Set(effectiveSections);
-    return NAV_ITEMS.filter((n) => allowSet.has(n.key));
-  }, [effectiveSections]);
+    return navItems.filter((n) => allowSet.has(n.key));
+  }, [effectiveSections, navItems]);
 
   const workShifts: WorkShift[] = useMemo(
     () =>
@@ -517,10 +532,11 @@ export function AppShell(props: {
   const handleNavigate = (s: DirectorSection) => {
     const allowSet = new Set(effectiveSections);
     if (!allowSet.has(s)) return;
-    const found = NAV_ITEMS.find((n) => n.key === s);
+    const found = navItems.find((n) => n.key === s);
     const parts = pathname.split("/").filter(Boolean);
     const slug = parts[0] || "";
-    const path = found ? `/${slug}/${found.path}` : `/${slug}/tong-quan`;
+    const fallbackPath = navItems[0]?.path || "tong-quan";
+    const path = found ? `/${slug}/${found.path}` : `/${slug}/${fallbackPath}`;
     router.push(path);
   };
 

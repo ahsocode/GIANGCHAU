@@ -55,9 +55,33 @@ const NAV_ITEMS: NavItem[] = [
   {
     key: "employeeAccounts",
     label: "Quản lý tài khoản",
-path: "quan-ly-nhan-vien/quan-ly-tai-khoan",
+    path: "quan-ly-nhan-vien/quan-ly-tai-khoan",
   },
-  { key: "attendance", label: "Quản lý chấm công", path: "quan-ly-cham-cong" },
+  {
+    key: "attendanceOverview",
+    label: "Tổng quan chấm công",
+    path: "quan-ly-cham-cong",
+  },
+  {
+    key: "attendanceDailyReport",
+    label: "Báo cáo chấm công theo ngày",
+    path: "quan-ly-cham-cong/bao-cao-ngay",
+  },
+  {
+    key: "attendanceWeeklyReport",
+    label: "Báo cáo chấm công theo tuần",
+    path: "quan-ly-cham-cong/bao-cao-tuan",
+  },
+  {
+    key: "attendanceMonthlyReport",
+    label: "Báo cáo chấm công theo tháng",
+    path: "quan-ly-cham-cong/bao-cao-thang",
+  },
+  {
+    key: "attendanceEdit",
+    label: "Chỉnh sửa chấm công",
+    path: "quan-ly-cham-cong/chinh-sua",
+  },
   { key: "shiftOverview", label: "Tổng quan ca làm", path: "quan-ly-ca-lam/tong-quan-ca-lam" },
   { key: "shifts", label: "Ca làm", path: "quan-ly-ca-lam/ca-lam" },
   { key: "shiftAssignment", label: "Phân ca", path: "quan-ly-ca-lam/phan-ca" },

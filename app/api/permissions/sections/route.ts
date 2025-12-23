@@ -96,7 +96,7 @@ export async function PUT(req: Request) {
     .map((k) => sectionIdByKey.get(k))
     .filter((v) => typeof v === "number") as number[];
 
-  await db.$transaction(async (tx: any) => {
+  await db.$transaction(async (tx: typeof db) => {
     await tx.roleSectionAccess.deleteMany({
       where: {
         roleId: role.id,

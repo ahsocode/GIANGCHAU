@@ -30,7 +30,11 @@ export function AppLayout(props: Props) {
     { key: "departments", label: "Quản lý bộ phận" },
     { key: "employeesOverview", label: "Tổng quan nhân viên" },
     { key: "employees", label: "Danh sách nhân viên" },
-    { key: "attendance", label: "Quản lý chấm công" },
+    { key: "attendanceOverview", label: "Tổng quan chấm công" },
+    { key: "attendanceDailyReport", label: "Báo cáo chấm công theo ngày" },
+    { key: "attendanceWeeklyReport", label: "Báo cáo chấm công theo tuần" },
+    { key: "attendanceMonthlyReport", label: "Báo cáo chấm công theo tháng" },
+    { key: "attendanceEdit", label: "Chỉnh sửa chấm công" },
     { key: "shifts", label: "Quản lý ca làm" },
   ];
   const items = menuItems !== undefined ? menuItems : defaultMenu;
@@ -56,6 +60,13 @@ export function AppLayout(props: Props) {
   const [employeeMenuOpen, setEmployeeMenuOpen] = useState(() =>
     section === "employees" || section === "employeesOverview"
   );
+  const [attendanceMenuOpen, setAttendanceMenuOpen] = useState(() =>
+    section === "attendanceOverview" ||
+    section === "attendanceDailyReport" ||
+    section === "attendanceWeeklyReport" ||
+    section === "attendanceMonthlyReport" ||
+    section === "attendanceEdit"
+  );
   const [roleMenuOpen, setRoleMenuOpen] = useState(() =>
     section === "roles" || section === "permissions"
   );
@@ -75,12 +86,22 @@ export function AppLayout(props: Props) {
     localStorage.setItem("sidebarOpen", sidebarOpen ? "true" : "false");
   }, [sidebarOpen]);
 
+  const attendanceKeys = new Set<DirectorSection>([
+    "attendanceOverview",
+    "attendanceDailyReport",
+    "attendanceWeeklyReport",
+    "attendanceMonthlyReport",
+    "attendanceEdit",
+  ]);
   const employeeKeys = new Set<DirectorSection>([
     "employeesOverview",
     "employees",
     "employeeInfo",
     "employeeAccounts",
   ]);
+  const attendanceItems = items.filter((i) => attendanceKeys.has(i.key));
+  const firstAttendanceIndex = items.findIndex((i) => attendanceKeys.has(i.key));
+  const isAttendanceSection = attendanceKeys.has(section);
   const employeeItems = items.filter((i) => employeeKeys.has(i.key));
   const firstEmployeeIndex = items.findIndex((i) => employeeKeys.has(i.key));
   const isEmployeeSection =
@@ -110,6 +131,11 @@ export function AppLayout(props: Props) {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isAttendanceSection && !attendanceMenuOpen) setAttendanceMenuOpen(true);
+  }, [isAttendanceSection, attendanceMenuOpen]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isRoleSection && !roleMenuOpen) setRoleMenuOpen(true);
   }, [isRoleSection, roleMenuOpen]);
 
@@ -119,6 +145,7 @@ export function AppLayout(props: Props) {
   }, [isShiftSection, shiftMenuOpen]);
 
   const handleNavigateItem = (key: DirectorSection) => {
+    if (!attendanceKeys.has(key)) setAttendanceMenuOpen(false);
     if (!employeeKeys.has(key)) setEmployeeMenuOpen(false);
     if (!roleKeys.has(key)) setRoleMenuOpen(false);
     if (!shiftKeys.has(key)) setShiftMenuOpen(false);
@@ -174,9 +201,64 @@ export function AppLayout(props: Props) {
           {/* Navigation */}
           <nav className="flex-1 px-4 py-5 space-y-1.5 text-sm overflow-y-auto">
             {items.map((item, idx) => {
+              const isAttendance = attendanceKeys.has(item.key);
               const isEmployee = employeeKeys.has(item.key);
               const isRole = roleKeys.has(item.key);
               const isShift = shiftKeys.has(item.key);
+
+              if (isAttendance) {
+                if (idx !== firstAttendanceIndex) return null;
+
+                return (
+                  <div key="attendance-group" className="pt-1">
+                    <button
+                      onClick={() => setAttendanceMenuOpen((v) => !v)}
+                      className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isAttendanceSection
+                          ? "bg-blue-600 text-white shadow-md"
+                          : "text-slate-700 hover:bg-slate-100"
+                      }`}
+                      aria-expanded={attendanceMenuOpen}
+                      aria-controls="attendance-nav"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 7h14M5 17h14" />
+                        </svg>
+                        <span>Cụm chấm công</span>
+                      </div>
+                      <svg
+                        className={`w-4 h-4 transition-transform duration-200 ${
+                          attendanceMenuOpen ? "rotate-180" : ""
+                        }`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    <div
+                      id="attendance-nav"
+                      className={`overflow-hidden transition-all duration-300 ${
+                        attendanceMenuOpen ? "max-h-56 mt-1.5" : "max-h-0"
+                      }`}
+                    >
+                      <div className="space-y-1 pl-3 border-l-2 border-blue-200 ml-5">
+                        {attendanceItems.map((child) => (
+                          <SidebarItem
+                            key={child.key}
+                            label={child.label}
+                            active={section === child.key}
+                            onClick={() => handleNavigateItem(child.key)}
+                            isSubItem
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
 
               if (isEmployee) {
                 if (idx !== firstEmployeeIndex) return null;

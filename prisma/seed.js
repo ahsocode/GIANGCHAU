@@ -38,12 +38,16 @@ const sections = [
   { key: "employees", label: "Danh sách nhân viên", path: "quan-ly-nhan-vien/danh-sach-nhan-vien", group: "nhan-su", sortOrder: 4, actions: [SectionAction.VIEW, SectionAction.CREATE, SectionAction.UPDATE, SectionAction.DELETE] },
   { key: "employeeInfo", label: "Thông tin nhân viên", path: "quan-ly-nhan-vien/thong-tin-nhan-vien", group: "nhan-su", sortOrder: 5, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
   { key: "employeeAccounts", label: "Quản lý tài khoản", path: "quan-ly-nhan-vien/quan-ly-tai-khoan", group: "nhan-su", sortOrder: 6, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
-  { key: "attendance", label: "Quản lý chấm công", path: "quan-ly-cham-cong", group: "cham-cong", sortOrder: 7, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
-  { key: "shiftOverview", label: "Tổng quan ca làm", path: "quan-ly-ca-lam/tong-quan-ca-lam", group: "cham-cong", sortOrder: 8, actions: [SectionAction.VIEW] },
-  { key: "shifts", label: "Ca làm", path: "quan-ly-ca-lam/ca-lam", group: "cham-cong", sortOrder: 9, actions: [SectionAction.VIEW, SectionAction.CREATE, SectionAction.UPDATE, SectionAction.DELETE] },
-  { key: "shiftAssignment", label: "Phân ca", path: "quan-ly-ca-lam/phan-ca", group: "cham-cong", sortOrder: 10, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
-  { key: "permissions", label: "Phân quyền", path: "quan-ly-chuc-vu/phan-quyen", group: "he-thong", sortOrder: 11, actions: [SectionAction.VIEW, SectionAction.MANAGE] },
-  { key: "roles", label: "Chức vụ", path: "quan-ly-chuc-vu/chuc-vu", group: "he-thong", sortOrder: 12, actions: [SectionAction.VIEW, SectionAction.CREATE, SectionAction.UPDATE, SectionAction.DELETE] },
+  { key: "attendanceOverview", label: "Tổng quan chấm công", path: "quan-ly-cham-cong", group: "cham-cong", sortOrder: 7, actions: [SectionAction.VIEW] },
+  { key: "attendanceDailyReport", label: "Báo cáo chấm công theo ngày", path: "quan-ly-cham-cong/bao-cao-ngay", group: "cham-cong", sortOrder: 8, actions: [SectionAction.VIEW] },
+  { key: "attendanceWeeklyReport", label: "Báo cáo chấm công theo tuần", path: "quan-ly-cham-cong/bao-cao-tuan", group: "cham-cong", sortOrder: 9, actions: [SectionAction.VIEW] },
+  { key: "attendanceMonthlyReport", label: "Báo cáo chấm công theo tháng", path: "quan-ly-cham-cong/bao-cao-thang", group: "cham-cong", sortOrder: 10, actions: [SectionAction.VIEW] },
+  { key: "attendanceEdit", label: "Chỉnh sửa chấm công", path: "quan-ly-cham-cong/chinh-sua", group: "cham-cong", sortOrder: 11, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
+  { key: "shiftOverview", label: "Tổng quan ca làm", path: "quan-ly-ca-lam/tong-quan-ca-lam", group: "cham-cong", sortOrder: 12, actions: [SectionAction.VIEW] },
+  { key: "shifts", label: "Ca làm", path: "quan-ly-ca-lam/ca-lam", group: "cham-cong", sortOrder: 13, actions: [SectionAction.VIEW, SectionAction.CREATE, SectionAction.UPDATE, SectionAction.DELETE] },
+  { key: "shiftAssignment", label: "Phân ca", path: "quan-ly-ca-lam/phan-ca", group: "cham-cong", sortOrder: 14, actions: [SectionAction.VIEW, SectionAction.UPDATE] },
+  { key: "permissions", label: "Phân quyền", path: "quan-ly-chuc-vu/phan-quyen", group: "he-thong", sortOrder: 15, actions: [SectionAction.VIEW, SectionAction.MANAGE] },
+  { key: "roles", label: "Chức vụ", path: "quan-ly-chuc-vu/chuc-vu", group: "he-thong", sortOrder: 16, actions: [SectionAction.VIEW, SectionAction.CREATE, SectionAction.UPDATE, SectionAction.DELETE] },
 ];
 
 const roleSectionAccess = {

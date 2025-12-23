@@ -86,7 +86,7 @@ function EmployeesSection({
         if (department) params.set("department", department);
         if (shiftCode) params.set("shiftCode", shiftCode);
 
-        const res = await fetch(`/api/employees?${params.toString()}`, {
+        const res = await fetch(`/api/employees/list?${params.toString()}`, {
           signal: controller.signal,
         });
         if (!res.ok) {

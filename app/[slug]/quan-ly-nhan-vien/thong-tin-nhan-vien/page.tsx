@@ -128,7 +128,7 @@ function EmployeeInfoContent({
         if (employmentType) params.set("employmentType", employmentType);
         if (department) params.set("department", department);
         if (shiftCode) params.set("shiftCode", shiftCode);
-        const res = await fetch(`/api/employees?${params.toString()}`, { signal: controller.signal });
+        const res = await fetch(`/api/employees/info?${params.toString()}`, { signal: controller.signal });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Không tải được danh sách nhân viên");

@@ -1,0 +1,440 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { AppShell } from "@/component/layout/AppShell";
+import type { DirectorSection } from "@/app/types";
+import { DEFAULT_ROLE_SECTIONS, sanitizeRoleSections } from "@/lib/role-permissions";
+
+type RoleConfig = Record<string, DirectorSection[]>;
+type ApiSection = {
+  key: DirectorSection;
+  label: string;
+  path: string;
+  group?: string | null;
+  sortOrder?: number | null;
+};
+type ApiRole = { key: string; name: string | null; isDirector: boolean };
+type ApiPayload = {
+  sections: ApiSection[];
+  roles: ApiRole[];
+  roleAccess: RoleConfig;
+};
+
+const FALLBACK_SECTIONS: ApiSection[] = [
+  { key: "overview", label: "Tổng quan", path: "tong-quan" },
+  { key: "departments", label: "Quản lý bộ phận", path: "quan-ly-bo-phan" },
+  { key: "employeesOverview", label: "Tổng quan nhân viên", path: "quan-ly-nhan-vien/tong-quan-nhan-vien" },
+  { key: "employees", label: "Danh sách nhân viên", path: "quan-ly-nhan-vien/danh-sach-nhan-vien" },
+  { key: "attendanceOverview", label: "Tổng quan chấm công", path: "quan-ly-cham-cong" },
+  { key: "attendanceDailyReport", label: "Báo cáo chấm công theo ngày", path: "quan-ly-cham-cong/bao-cao-ngay" },
+  { key: "attendanceWeeklyReport", label: "Báo cáo chấm công theo tuần", path: "quan-ly-cham-cong/bao-cao-tuan" },
+  { key: "attendanceMonthlyReport", label: "Báo cáo chấm công theo tháng", path: "quan-ly-cham-cong/bao-cao-thang" },
+  { key: "attendanceEdit", label: "Chỉnh sửa chấm công", path: "quan-ly-cham-cong/chinh-sua" },
+  { key: "shiftOverview", label: "Tổng quan ca làm", path: "quan-ly-ca-lam/tong-quan-ca-lam" },
+  { key: "shifts", label: "Ca làm", path: "quan-ly-ca-lam/ca-lam" },
+  { key: "shiftAssignment", label: "Phân ca", path: "quan-ly-ca-lam/phan-ca" },
+  { key: "permissions", label: "Phân quyền", path: "quan-ly-chuc-vu/phan-quyen" },
+  { key: "roles", label: "Chức vụ", path: "quan-ly-chuc-vu/chuc-vu" },
+];
+
+const LOCKED = new Set(["ADMIN", "DIRECTOR"]);
+
+export default function PermissionsPage() {
+  const [config, setConfig] = useState<RoleConfig>({});
+  const [sections, setSections] = useState<ApiSection[]>([]);
+  const [roles, setRoles] = useState<ApiRole[]>([]);
+  const [activeRole, setActiveRole] = useState<string>("MANAGER");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [currentRole, setCurrentRole] = useState<string | null>(null);
+  const [newSection, setNewSection] = useState({
+    key: "",
+    label: "",
+    path: "",
+    group: "",
+    sortOrder: "0",
+  });
+  const [creating, setCreating] = useState(false);
+  const [createMessage, setCreateMessage] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const load = () => {
+    setError(null);
+    fetch("/api/permissions/sections", { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Không tải được phân quyền");
+        }
+        return res.json();
+      })
+      .then((data: ApiPayload) => {
+        const sectionList = (data.sections || []).length ? data.sections : FALLBACK_SECTIONS;
+        setSections(sectionList);
+        setRoles(data.roles || []);
+        setConfig(data.roleAccess || {});
+        const firstEditable =
+          data.roles?.find((r) => !LOCKED.has((r.key || "").toUpperCase()))?.key ||
+          "MANAGER";
+        setActiveRole(firstEditable);
+        if (!data.sections?.length) {
+          setMessage("Chưa có dữ liệu phân quyền trong DB. Đang hiển thị danh sách mặc định.");
+        }
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : "Lỗi không xác định";
+        setError(msg);
+      });
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = localStorage.getItem("currentAccount");
+    if (!raw) return;
+    try {
+      const acc = JSON.parse(raw);
+      setCurrentRole((acc.role || acc.roleKey || "").toUpperCase());
+    } catch {
+      setCurrentRole(null);
+    }
+  }, []);
+
+  const visibleConfig = useMemo(() => {
+    const allKeys = sections.map((s) => s.key);
+    const current = config[activeRole] || DEFAULT_ROLE_SECTIONS[activeRole] || [];
+    const sanitized = sanitizeRoleSections(activeRole, current, allKeys);
+    return new Set<DirectorSection>(sanitized);
+  }, [activeRole, config, sections]);
+
+  const isLocked = LOCKED.has((activeRole || "").toUpperCase());
+
+  const toggleSection = (section: DirectorSection) => {
+    if (isLocked) return;
+    setConfig((prev) => {
+      const next = { ...prev };
+      const allKeys = sections.map((s) => s.key);
+      const current = new Set<DirectorSection>(
+        sanitizeRoleSections(
+          activeRole,
+          next[activeRole] || DEFAULT_ROLE_SECTIONS[activeRole] || [],
+          allKeys
+        )
+      );
+      if (current.has(section)) current.delete(section);
+      else current.add(section);
+      next[activeRole] = Array.from(current);
+      return next;
+    });
+  };
+
+  const handleSave = () => {
+    setSaving(true);
+    setMessage(null);
+    setError(null);
+
+    const allKeys = sections.map((s) => s.key);
+    const sanitized = sanitizeRoleSections(activeRole, Array.from(visibleConfig), allKeys);
+
+    fetch("/api/permissions/sections", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: activeRole, sections: sanitized }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Không thể lưu phân quyền");
+        }
+        return res.json();
+      })
+      .then((resp: { role: string; sections: DirectorSection[] }) => {
+        setConfig((prev) => ({
+          ...prev,
+          [resp.role.toUpperCase()]: resp.sections,
+        }));
+        setMessage("Đã lưu phân quyền từ API.");
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : "Lỗi không xác định";
+        setError(msg);
+      })
+      .finally(() => setSaving(false));
+  };
+
+  const resetRole = () => {
+    if (isLocked) return;
+    setConfig((prev) => {
+      const next = { ...prev };
+      next[activeRole] = DEFAULT_ROLE_SECTIONS[activeRole] || [];
+      return next;
+    });
+  };
+
+  const roleOptions = useMemo(() => {
+    if (!roles.length) {
+      return [
+        { key: "ADMIN", label: "Admin (khóa)" },
+        { key: "DIRECTOR", label: "Giám đốc (khóa)" },
+        { key: "MANAGER", label: "Trưởng phòng" },
+        { key: "ACCOUNTANT", label: "Kế toán" },
+        { key: "SUPERVISOR", label: "Giám sát" },
+        { key: "EMPLOYEE", label: "Nhân viên" },
+        { key: "TEMPORARY", label: "Thời vụ" },
+      ];
+    }
+    return roles.map((r) => ({
+      key: r.key.toUpperCase(),
+      label: r.name || r.key,
+      locked: LOCKED.has((r.key || "").toUpperCase()) || r.isDirector,
+    }));
+  }, [roles]);
+
+  const isAdmin = (currentRole || "").toUpperCase() === "ADMIN";
+
+  const handleCreateSection = async () => {
+    setCreateError(null);
+    setCreateMessage(null);
+    if (!isAdmin) {
+      setCreateError("Chỉ Admin mới được thêm chức năng.");
+      return;
+    }
+    if (!newSection.key.trim() || !newSection.label.trim() || !newSection.path.trim()) {
+      setCreateError("Vui lòng điền đủ Key, Tên hiển thị và Path.");
+      return;
+    }
+
+    const payload = {
+      role: currentRole,
+      key: newSection.key.trim(),
+      label: newSection.label.trim(),
+      path: newSection.path.trim(),
+      group: newSection.group.trim() || null,
+      sortOrder: Number(newSection.sortOrder) || 0,
+    };
+
+    try {
+      setCreating(true);
+      const res = await fetch("/api/permissions/sections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Không thể thêm chức năng");
+      }
+      setCreateMessage("Đã thêm chức năng mới. Vào danh sách quyền để bật cho role.");
+      setNewSection({ key: "", label: "", path: "", group: "", sortOrder: "0" });
+      load();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Không thể thêm chức năng";
+      setCreateError(msg);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <AppShell
+      activeSection="permissions"
+      render={() => (
+        <div className="space-y-5">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-blue-600 uppercase tracking-wide">
+                  Phân quyền sidebar
+                </p>
+                <h2 className="text-lg font-semibold text-slate-900">Chọn tab hiển thị theo chức vụ</h2>
+                <p className="text-sm text-slate-600">
+                  Admin và Giám đốc luôn thấy toàn bộ menu và không bị chỉnh sửa. Các chức vụ khác
+                  do Admin/Giám đốc quyết định.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={activeRole}
+                  onChange={(e) => setActiveRole(e.target.value)}
+                  className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50 bg-white"
+                >
+                  {roleOptions.map((role) => (
+                    <option key={role.key} value={role.key}>
+                      {role.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={resetRole}
+                  disabled={isLocked}
+                  className="px-3 py-2 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+                >
+                  Khôi phục mặc định
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={isLocked || saving}
+                  className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition disabled:opacity-60"
+                >
+                  {saving ? "Đang lưu..." : "Lưu cấu hình"}
+                </button>
+              </div>
+            </div>
+            {message && (
+              <div className="mt-3 text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2 inline-flex items-center gap-2">
+                <span>{message}</span>
+              </div>
+            )}
+            {error && (
+              <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2 inline-flex items-center gap-2">
+                <span>{error}</span>
+              </div>
+            )}
+          </div>
+
+          {isAdmin && (
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold text-blue-600 uppercase tracking-wide">
+                  Thêm chức năng (Admin)
+                </p>
+                <h3 className="text-base font-semibold text-slate-900">
+                  Đưa chức năng mới vào bảng phân quyền
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Key sẽ là định danh duy nhất, Path là phần sau slug (ví dụ: <code>quan-ly-ca-lam/ca-lam</code>).
+                </p>
+              </div>
+              {!isAdmin && (
+                <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                  Chỉ Admin có thể thêm
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">Key</label>
+                <input
+                  value={newSection.key}
+                  onChange={(e) => setNewSection((v) => ({ ...v, key: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  placeholder="vd: attendanceExport"
+                  disabled={!isAdmin}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">Tên hiển thị</label>
+                <input
+                  value={newSection.label}
+                  onChange={(e) => setNewSection((v) => ({ ...v, label: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  placeholder="vd: Xuất báo cáo"
+                  disabled={!isAdmin}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">Path</label>
+                <input
+                  value={newSection.path}
+                  onChange={(e) => setNewSection((v) => ({ ...v, path: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  placeholder="vd: quan-ly-ca-lam/bao-cao"
+                  disabled={!isAdmin}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">Nhóm (tuỳ chọn)</label>
+                <input
+                  value={newSection.group}
+                  onChange={(e) => setNewSection((v) => ({ ...v, group: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  placeholder="vd: attendance"
+                  disabled={!isAdmin}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">Thứ tự (số nhỏ lên trước)</label>
+                <input
+                  type="number"
+                  value={newSection.sortOrder}
+                  onChange={(e) => setNewSection((v) => ({ ...v, sortOrder: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  placeholder="0"
+                  disabled={!isAdmin}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3 mt-4 flex-wrap">
+              <div className="text-xs text-slate-500">
+                Thêm xong hãy vào danh sách quyền bên dưới để bật chức năng cho các role cần dùng.
+              </div>
+              <button
+                onClick={handleCreateSection}
+                disabled={!isAdmin || creating}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition disabled:opacity-50"
+              >
+                {creating ? "Đang thêm..." : "Thêm chức năng mới"}
+              </button>
+            </div>
+            {createMessage && (
+              <div className="mt-3 text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2 inline-flex items-center gap-2">
+                <span>{createMessage}</span>
+              </div>
+            )}
+            {createError && (
+              <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2 inline-flex items-center gap-2">
+                <span>{createError}</span>
+              </div>
+            )}
+            </div>
+          )}
+
+          <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
+            <div className="border-b border-slate-200 px-6 py-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">
+                Quyền menu cho{" "}
+                {roleOptions.find((r) => r.key === activeRole)?.label || activeRole}
+              </h3>
+              {isLocked && <span className="text-xs text-slate-500">Luôn đầy đủ, không chỉnh sửa.</span>}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 p-4">
+              {sections.map((section) => (
+                <label
+                  key={section.key}
+                  className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm ${
+                    visibleConfig.has(section.key)
+                      ? "border-blue-200 bg-blue-50 text-blue-700"
+                      : "border-slate-200 text-slate-700"
+                  } ${isLocked ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    checked={visibleConfig.has(section.key)}
+                    onChange={() => toggleSection(section.key)}
+                    disabled={isLocked}
+                  />
+                  <span>{section.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-5 text-sm text-slate-700">
+            <p className="font-semibold text-slate-900 mb-2">Ghi chú</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Dữ liệu lấy từ API `/api/permissions/sections`. Admin/Giám đốc luôn có toàn quyền.</li>
+              <li>Admin/Giám đốc luôn có toàn quyền và không thể bị khóa.</li>
+              <li>Những tab bạn bật ở đây sẽ xuất hiện trong sidebar của role tương ứng.</li>
+            </ul>
+          </div>
+        </div>
+      )}
+    />
+  );
+}

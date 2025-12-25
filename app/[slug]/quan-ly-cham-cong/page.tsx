@@ -14,7 +14,7 @@ interface Props {
 export default function AttendancePage() {
   return (
     <AppShell
-      activeSection="attendance"
+      activeSection="attendanceOverview"
       render={({ employees, attendance, workConfig }) => (
         <AttendanceSection
           employees={employees}
@@ -115,7 +115,7 @@ function AttendanceSection({ employees, attendance, workConfig }: Props) {
         <div className="flex flex-wrap gap-3 items-center justify-between mb-3">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">
-              Quản lý chấm công
+              Tổng quan chấm công
             </h2>
             <p className="text-xs text-slate-500">
               Dữ liệu lấy trực tiếp từ Supabase.

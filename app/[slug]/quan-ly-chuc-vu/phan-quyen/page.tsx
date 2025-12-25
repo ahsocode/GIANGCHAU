@@ -296,7 +296,8 @@ export default function PermissionsPage() {
             )}
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+          {isAdmin && (
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
                 <p className="text-sm font-semibold text-blue-600 uppercase tracking-wide">
@@ -390,7 +391,8 @@ export default function PermissionsPage() {
                 <span>{createError}</span>
               </div>
             )}
-          </div>
+            </div>
+          )}
 
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
             <div className="border-b border-slate-200 px-6 py-3 flex items-center justify-between">

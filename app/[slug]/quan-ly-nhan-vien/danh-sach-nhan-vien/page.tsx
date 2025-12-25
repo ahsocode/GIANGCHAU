@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import type { Employee } from "@/lib/hr-types";
 import { AppShell } from "@/component/layout/AppShell";
 import { Toaster, toast } from "sonner";
@@ -44,22 +45,22 @@ function EmployeesSection({
   const [employmentType, setEmploymentType] = useState<string>("");
   const [department, setDepartment] = useState<string>("");
   const [shiftCode, setShiftCode] = useState<string>("");
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [shiftMap, setShiftMap] = useState<Map<string, string>>(new Map());
-  const [dataInitialized, setDataInitialized] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const router = useRouter();
+  const params = useParams<{ slug?: string }>();
+  const slug = (params?.slug as string) || "";
 
   // Khởi tạo dữ liệu từ fallback ngay lập tức
   useEffect(() => {
-    if (!dataInitialized && fallbackEmployees.length > 0) {
+    if (fallbackEmployees.length > 0 && data.length === 0) {
       setData(fallbackEmployees);
       setTotal(fallbackEmployees.length);
-      setDataInitialized(true);
     }
-  }, [fallbackEmployees, dataInitialized]);
+  }, [fallbackEmployees, data.length]);
 
   const optionSource = data.length ? data : fallbackEmployees;
   const roleOptions = useMemo(
@@ -108,11 +109,10 @@ function EmployeesSection({
         }
         const data: ApiResponse = await res.json();
         
-        // Chỉ update nếu có dữ liệu từ API
         if (data.items && data.items.length > 0) {
           setData(data.items);
           setTotal(data.total || 0);
-        } else if (!dataInitialized && fallbackEmployees.length > 0) {
+        } else if (fallbackEmployees.length > 0) {
           // Nếu API trả về rỗng và chưa init, dùng fallback
           setData(fallbackEmployees);
           setTotal(fallbackEmployees.length);
@@ -133,13 +133,10 @@ function EmployeesSection({
       }
     }
     
-    // Chỉ load từ API sau khi đã init dữ liệu
-    if (dataInitialized) {
-      load();
-    }
+    load();
     
     return () => controller.abort();
-  }, [page, pageSize, sortBy, sortDir, roleKey, employmentType, department, shiftCode, dataInitialized, fallbackEmployees, data.length, reloadToken]);
+  }, [page, pageSize, sortBy, sortDir, roleKey, employmentType, department, shiftCode, fallbackEmployees, data.length, reloadToken]);
 
   useEffect(() => {
     const map = new Map<string, string>();
@@ -347,7 +344,11 @@ function EmployeesSection({
                     <td className="px-3 py-2">
                       <button
                         className="px-3 py-1 rounded-md text-[11px] font-medium bg-blue-600 text-white hover:bg-blue-500 transition"
-                        onClick={() => setSelectedEmployee(e)}
+                        onClick={() =>
+                          router.push(
+                            `${slug ? `/${slug}` : ""}/quan-ly-nhan-vien/nhan-vien/${encodeURIComponent(e.code)}`
+                          )
+                        }
                       >
                         Xem chi tiết
                       </button>
@@ -380,9 +381,6 @@ function EmployeesSection({
         </div>
       </div>
 
-      {selectedEmployee && (
-        <EmployeeDetailModal employee={selectedEmployee} onClose={() => setSelectedEmployee(null)} />
-      )}
       {showCreate && (
         <CreateEmployeeModal
           roleOptions={roleOptions}
@@ -589,71 +587,6 @@ function CreateEmployeeModal({ roleOptions, onClose, onCreated }: CreateEmployee
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function EmployeeDetailModal(props: { employee: Employee; onClose: () => void }) {
-  const { employee, onClose } = props;
-
-  const shiftLabel = employee.shiftCode ? `Ca ${employee.shiftCode}` : "-";
-
-  return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-lg w-[420px] max-w-[90vw]">
-        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-          <div>
-            <div className="text-xs text-slate-500">Thông tin nhân viên</div>
-            <div className="text-sm font-semibold text-slate-900">{employee.name}</div>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 text-lg leading-none"
-            aria-label="Đóng"
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="px-4 py-4 space-y-3 text-xs text-slate-700">
-          <DetailRow label="Mã nhân viên" value={employee.code} />
-          <DetailRow label="Chức vụ" value={employee.roleName || employee.roleKey || "-"} />
-          <DetailRow
-            label="Loại"
-            value={employee.employmentType === "FULL_TIME" ? "Chính thức" : "Thời vụ"}
-          />
-          <DetailRow label="Phòng ban / xưởng" value={employee.department} />
-          <DetailRow
-            label="Trạng thái làm việc"
-            value={employee.workStatusLabel || (employee.workStatus === "ACTIVE" ? "Đang làm" : "Đã nghỉ")}
-          />
-          <DetailRow label="Ngày vào làm" value={employee.startDate || "-"} />
-          <DetailRow label="Số điện thoại" value={employee.phone || "-"} />
-          <DetailRow label="Email" value={employee.email || "-"} />
-          <DetailRow label="CCCD" value={employee.cccd || "-"} />
-          <DetailRow label="BHXH" value={employee.bhxh || "-"} />
-          <DetailRow label="Ca làm" value={shiftLabel} />
-        </div>
-
-        <div className="px-4 py-3 border-t border-slate-200 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-medium text-slate-700 bg-slate-100 rounded-md hover:bg-slate-200 transition"
-          >
-            Đóng
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DetailRow(props: { label: string; value: string }) {
-  const { label, value } = props;
-  return (
-    <div className="flex justify-between gap-4">
-      <div className="text-slate-500">{label}</div>
-      <div className="font-medium text-slate-900 text-right wrap-break-word">{value}</div>
     </div>
   );
 }

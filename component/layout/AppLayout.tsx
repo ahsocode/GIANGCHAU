@@ -9,13 +9,13 @@ type Props = {
   accountName: string;
   section: DirectorSection;
   roleKey?: string;
-  menuItems?: { key: DirectorSection; label: string; group?: string | null }[];
+  menuItems?: { key: DirectorSection; label: string; group?: string | null; path?: string }[];
   onNavigate: (s: DirectorSection) => void;
   onLogout: () => void;
   children: ReactNode;
 };
 
-type MenuItem = { key: DirectorSection; label: string; group?: string | null };
+type MenuItem = { key: DirectorSection; label: string; group?: string | null; path?: string };
 
 const DEFAULT_MENU: MenuItem[] = [
   { key: "overview", label: "Tổng quan" },
@@ -29,6 +29,8 @@ const DEFAULT_MENU: MenuItem[] = [
   { key: "attendanceEdit", label: "Chỉnh sửa chấm công", group: "attendance" },
   { key: "shifts", label: "Quản lý ca làm", group: "shift" },
 ];
+
+const GROUP_STORAGE_KEY = "sidebarGroupOpen";
 
 export function AppLayout(props: Props) {
   const { accountName, section, roleKey, menuItems, onNavigate, onLogout, children } = props;
@@ -83,6 +85,52 @@ export function AppLayout(props: Props) {
 
   // ---------- Normalize items ----------
   const items: MenuItem[] = useMemo(() => {
+    const normalizeText = (value: unknown) => {
+      if (value == null) return "";
+      return String(value)
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .toLowerCase();
+    };
+
+    const detectCanonicalGroup = (value: unknown) => {
+      const normalized = normalizeText(value);
+      if (!normalized) return null;
+      if (normalized.includes("attendance") || normalized.includes("cham-cong") || normalized.includes("cham cong")) {
+        return "attendance";
+      }
+      if (
+        normalized.includes("employee") ||
+        normalized.includes("nhan-vien") ||
+        normalized.includes("nhan vien") ||
+        normalized.includes("nhan-su") ||
+        normalized.includes("nhan su")
+      ) {
+        return "employees";
+      }
+      if (
+        normalized.includes("role") ||
+        normalized.includes("permission") ||
+        normalized.includes("chuc-vu") ||
+        normalized.includes("chuc vu") ||
+        normalized.includes("he-thong") ||
+        normalized.includes("he thong")
+      ) {
+        return "roles";
+      }
+      if (
+        normalized.includes("shift") ||
+        normalized.includes("ca-lam") ||
+        normalized.includes("ca lam") ||
+        normalized.includes("phan-ca") ||
+        normalized.includes("phan ca")
+      ) {
+        return "shift";
+      }
+      return null;
+    };
+
     const base = menuItems && menuItems.length > 0 ? menuItems : DEFAULT_MENU;
     const seen = new Set<string>();
     return base
@@ -93,21 +141,19 @@ export function AppLayout(props: Props) {
         return true;
       })
       .map((it) => {
-        const rawGroup = (it.group ?? "").toString().trim().toLowerCase();
-        if (rawGroup) return { ...it, group: rawGroup };
-        if (attendanceKeyBase.has(it.key)) return { ...it, group: "attendance" };
-        if (employeeKeyBase.has(it.key)) return { ...it, group: "employees" };
-        if (roleKeyBase.has(it.key)) return { ...it, group: "roles" };
-        if (shiftKeyBase.has(it.key)) return { ...it, group: "shift" };
-        return it;
+        const primaryPathSegment = typeof it.path === "string" ? it.path.split("/")[0] : "";
+        const canonicalGroup =
+          detectCanonicalGroup(it.key) ||
+          (attendanceKeyBase.has(it.key) ? "attendance" : null) ||
+          (employeeKeyBase.has(it.key) ? "employees" : null) ||
+          (roleKeyBase.has(it.key) ? "roles" : null) ||
+          (shiftKeyBase.has(it.key) ? "shift" : null) ||
+          detectCanonicalGroup(primaryPathSegment) ||
+          detectCanonicalGroup(it.group);
+
+        return canonicalGroup ? { ...it, group: canonicalGroup } : it;
       });
   }, [menuItems, attendanceKeyBase, employeeKeyBase, roleKeyBase, shiftKeyBase]);
-
-  // ---------- Open states (base) ----------
-  const [employeeMenuOpenBase, setEmployeeMenuOpenBase] = useState(false);
-  const [attendanceMenuOpenBase, setAttendanceMenuOpenBase] = useState(false);
-  const [roleMenuOpenBase, setRoleMenuOpenBase] = useState(false);
-  const [shiftMenuOpenBase, setShiftMenuOpenBase] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(formatNow()), 1000);
@@ -164,6 +210,31 @@ export function AppLayout(props: Props) {
   const firstShiftIndex = items.findIndex((i) => shiftKeys.has(i.key));
   const isShiftSection = shiftKeys.has(section);
 
+  // ---------- Open states (base) ----------
+  const readStoredGroups = () => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = localStorage.getItem(GROUP_STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed as Record<string, boolean>;
+    } catch {
+      // ignore
+    }
+    return {};
+  };
+
+  const initialGroupState = readStoredGroups();
+
+  const [employeeMenuOpenBase, setEmployeeMenuOpenBase] = useState<boolean>(
+    initialGroupState.employees ?? isEmployeeSection
+  );
+  const [attendanceMenuOpenBase, setAttendanceMenuOpenBase] = useState<boolean>(
+    initialGroupState.attendance ?? isAttendanceSection
+  );
+  const [roleMenuOpenBase, setRoleMenuOpenBase] = useState<boolean>(initialGroupState.roles ?? isRoleSection);
+  const [shiftMenuOpenBase, setShiftMenuOpenBase] = useState<boolean>(initialGroupState.shift ?? isShiftSection);
+
   const employeeMenuOpen = employeeMenuOpenBase || isEmployeeSection;
   const attendanceMenuOpen = attendanceMenuOpenBase || isAttendanceSection;
   const roleMenuOpen = roleMenuOpenBase || isRoleSection;
@@ -171,15 +242,95 @@ export function AppLayout(props: Props) {
 
   const ATTENDANCE_GROUP_LABEL = "Cụm chấm công";
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const payload = {
+      employees: employeeMenuOpenBase,
+      attendance: attendanceMenuOpenBase,
+      roles: roleMenuOpenBase,
+      shift: shiftMenuOpenBase,
+    };
+    try {
+      localStorage.setItem(GROUP_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore persistence error
+    }
+  }, [employeeMenuOpenBase, attendanceMenuOpenBase, roleMenuOpenBase, shiftMenuOpenBase]);
+
+  const setExclusiveOpen = (
+    group: "employees" | "attendance" | "roles" | "shift",
+    mode: "toggle" | "open" = "toggle"
+  ) => {
+    const handler = (current: boolean, target: typeof group) => {
+      if (group !== target) return false;
+      if (mode === "open") return true;
+      return !current;
+    };
+
+    setEmployeeMenuOpenBase((v) => handler(v, "employees"));
+    setAttendanceMenuOpenBase((v) => handler(v, "attendance"));
+    setRoleMenuOpenBase((v) => handler(v, "roles"));
+    setShiftMenuOpenBase((v) => handler(v, "shift"));
+  };
+
   const handleNavigateItem = (key: DirectorSection) => {
-    if (!attendanceKeys.has(key)) setAttendanceMenuOpenBase(false);
-    if (!employeeKeys.has(key)) setEmployeeMenuOpenBase(false);
-    if (!roleKeys.has(key)) setRoleMenuOpenBase(false);
-    if (!shiftKeys.has(key)) setShiftMenuOpenBase(false);
+    if (attendanceKeys.has(key)) setExclusiveOpen("attendance", "open");
+    else if (employeeKeys.has(key)) setExclusiveOpen("employees", "open");
+    else if (roleKeys.has(key)) setExclusiveOpen("roles", "open");
+    else if (shiftKeys.has(key)) setExclusiveOpen("shift", "open");
+    else {
+      setAttendanceMenuOpenBase(false);
+      setEmployeeMenuOpenBase(false);
+      setRoleMenuOpenBase(false);
+      setShiftMenuOpenBase(false);
+    }
     onNavigate(key);
   };
 
   const seenGroups = new Set<string>();
+
+  const iconMap: Record<string, ReactNode> = {
+    overview: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l9-9 9 9-9 9-9-9z" />
+      </svg>
+    ),
+    departments: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 19h16M4 11h16M4 5h16M8 11V5m8 6V5M8 19v-8m8 8v-8" />
+      </svg>
+    ),
+    employees: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+        />
+      </svg>
+    ),
+    attendance: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V5m8 2V5m-9 8h6m-9 6h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    ),
+    shift: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m5-3a8 8 0 11-16 0 8 8 0 0116 0z" />
+      </svg>
+    ),
+    roles: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 11c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2-.895-2-2-2zm-7 0c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2-.895-2-2-2zm7 6c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2-.895-2-2-2zm-7 0c0-1.105.895-2 2-2s2 .895 2 2-.895 2-2 2-.895-2-2-2z"
+        />
+      </svg>
+    ),
+  };
 
   const groupMeta: Record<
     string,
@@ -242,8 +393,8 @@ export function AppLayout(props: Props) {
       {/* Toggle Button */}
       <button
         onClick={() => setSidebarOpen((v) => !v)}
-        className={`fixed top-5 left-4 z-50 h-9 w-9 rounded-lg bg-white text-blue-600 shadow-lg flex items-center justify-center transition-all duration-300 hover:shadow-xl hover:bg-blue-50 border border-slate-200 ${
-          sidebarOpen ? "ml-64" : "ml-0"
+        className={`fixed top-5 left-3 z-50 h-9 w-9 rounded-lg bg-white text-blue-600 shadow-lg flex items-center justify-center transition-all duration-300 hover:shadow-xl hover:bg-blue-50 border border-slate-200 ${
+          sidebarOpen ? "translate-x-60" : "translate-x-10"
         }`}
         aria-pressed={sidebarOpen}
         aria-label={sidebarOpen ? "Ẩn sidebar" : "Hiện sidebar"}
@@ -261,26 +412,32 @@ export function AppLayout(props: Props) {
       {/* Sidebar */}
       <aside
         className={`bg-white flex flex-col transition-all duration-300 ease-in-out shadow-lg border-r border-slate-200 fixed left-0 top-0 bottom-0 z-40 ${
-          sidebarOpen ? "w-72 translate-x-0" : "w-72 -translate-x-full"
+          sidebarOpen ? "w-72" : "w-16"
         }`}
-        aria-hidden={!sidebarOpen}
+        aria-hidden={false}
       >
         <div className="h-full flex flex-col">
           {/* Header */}
-          <div className="px-6 py-5 border-b border-slate-200 bg-linear-to-br from-blue-50 to-indigo-50">
+          <div
+            className={`border-b border-slate-200 bg-linear-to-br from-blue-50 to-indigo-50 ${
+              sidebarOpen ? "px-6 py-5" : "px-3 py-4"
+            }`}
+          >
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-xl bg-linear-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-md">
                 <span className="text-xl font-bold text-white">TS</span>
               </div>
-              <div>
-                <div className="text-xs font-bold text-blue-600 uppercase tracking-wide">Thủy Sản</div>
-                <div className="text-sm font-bold text-slate-800">Giang Châu</div>
-              </div>
+              {sidebarOpen && (
+                <div>
+                  <div className="text-xs font-bold text-blue-600 uppercase tracking-wide">Thủy Sản</div>
+                  <div className="text-sm font-bold text-slate-800">Giang Châu</div>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-4 py-5 space-y-1.5 text-sm overflow-y-auto">
+          <nav className={`flex-1 ${sidebarOpen ? "px-4" : "px-2"} py-5 space-y-1.5 text-sm overflow-y-auto`}>
             {items.map((item, idx) => {
               const group = (item.group || "").toString().trim().toLowerCase();
               const meta = groupMeta[group];
@@ -290,49 +447,67 @@ export function AppLayout(props: Props) {
                 seenGroups.add(group);
                 const groupedItems = items.filter((i) => (i.group || "").toString().trim().toLowerCase() === group);
                 const isGroupActive = groupedItems.some((gi) => gi.key === section);
-                const toggle = () => meta.setOpen((v) => !v);
+                const toggle = () => {
+                  if (!sidebarOpen) {
+                    setSidebarOpen(true);
+                    setExclusiveOpen(group as "employees" | "attendance" | "roles" | "shift", "open");
+                    return;
+                  }
+                  setExclusiveOpen(group as "employees" | "attendance" | "roles" | "shift");
+                };
                 const isOpen = meta.isOpen;
 
                 return (
                   <div key={`group-${group}`} className="pt-1">
                     <button
                       onClick={toggle}
-                      className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      className={`w-full flex items-center ${
+                        sidebarOpen ? "justify-between px-4" : "justify-center px-2"
+                      } py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                         isGroupActive ? "bg-blue-600 text-white shadow-md" : "text-slate-700 hover:bg-slate-100"
                       }`}
                       aria-expanded={isOpen}
                       aria-controls={`${group}-nav`}
+                      title={meta.label}
                     >
-                      <div className="flex items-center gap-2.5">
+                      <div className={`flex items-center ${sidebarOpen ? "gap-2.5" : "gap-0"}`}>
                         {meta.icon}
-                        <span>{meta.label}</span>
+                        {sidebarOpen && <span>{meta.label}</span>}
                       </div>
-                      <svg
-                        className={`w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
+                      {sidebarOpen && (
+                        <svg
+                          className={`w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      )}
                     </button>
 
-                    <div
-                      id={`${group}-nav`}
-                      className={`overflow-hidden transition-all duration-300 ${isOpen ? "max-h-80 mt-1.5" : "max-h-0"}`}
-                    >
-                      <div className="space-y-1 pl-3 border-l-2 border-blue-200 ml-5">
-                        {groupedItems.map((child) => (
-                          <SidebarItem
-                            key={child.key}
-                            label={child.label}
-                            active={section === child.key}
-                            onClick={() => handleNavigateItem(child.key)}
-                            isSubItem
-                          />
-                        ))}
+                    {sidebarOpen && (
+                      <div
+                        id={`${group}-nav`}
+                        className={`overflow-hidden transition-all duration-300 ${
+                          isOpen ? "max-h-80 mt-1.5" : "max-h-0"
+                        }`}
+                      >
+                        <div className="space-y-1 pl-3 border-l-2 border-blue-200 ml-5">
+                          {groupedItems.map((child) => (
+                            <SidebarItem
+                              key={child.key}
+                              label={child.label}
+                              active={section === child.key}
+                              onClick={() => handleNavigateItem(child.key)}
+                              isSubItem
+                              icon={iconMap[group] || iconMap.attendance}
+                              collapsed={!sidebarOpen}
+                            />
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               }
@@ -358,7 +533,14 @@ export function AppLayout(props: Props) {
                     key="attendance-group"
                     label={ATTENDANCE_GROUP_LABEL}
                     isOpen={attendanceMenuOpen}
-                    onToggle={() => setAttendanceMenuOpenBase((v: boolean) => !v)}
+                    onToggle={() => {
+                      if (!sidebarOpen) {
+                        setSidebarOpen(true);
+                        setExclusiveOpen("attendance", "open");
+                      } else {
+                        setExclusiveOpen("attendance");
+                      }
+                    }}
                     isActive={isAttendanceSection}
                     controlId="attendance-nav"
                     icon={
@@ -369,6 +551,8 @@ export function AppLayout(props: Props) {
                     items={attendanceItems}
                     section={section}
                     onNavigate={handleNavigateItem}
+                    collapsed={!sidebarOpen}
+                    iconMap={iconMap}
                   />
                 );
               }
@@ -379,7 +563,14 @@ export function AppLayout(props: Props) {
                     key="employee-group"
                     label="Quản lý nhân viên"
                     isOpen={employeeMenuOpen}
-                    onToggle={() => setEmployeeMenuOpenBase((v: boolean) => !v)}
+                    onToggle={() => {
+                      if (!sidebarOpen) {
+                        setSidebarOpen(true);
+                        setExclusiveOpen("employees", "open");
+                      } else {
+                        setExclusiveOpen("employees");
+                      }
+                    }}
                     isActive={isEmployeeSection}
                     controlId="employee-nav"
                     icon={
@@ -395,6 +586,8 @@ export function AppLayout(props: Props) {
                     items={employeeItems}
                     section={section}
                     onNavigate={handleNavigateItem}
+                    collapsed={!sidebarOpen}
+                    iconMap={iconMap}
                   />
                 );
               }
@@ -405,7 +598,14 @@ export function AppLayout(props: Props) {
                     key="role-group"
                     label="Quản lý chức vụ"
                     isOpen={roleMenuOpen}
-                    onToggle={() => setRoleMenuOpenBase((v: boolean) => !v)}
+                    onToggle={() => {
+                      if (!sidebarOpen) {
+                        setSidebarOpen(true);
+                        setExclusiveOpen("roles", "open");
+                      } else {
+                        setExclusiveOpen("roles");
+                      }
+                    }}
                     isActive={isRoleSection}
                     controlId="role-nav"
                     icon={
@@ -421,6 +621,8 @@ export function AppLayout(props: Props) {
                     items={roleItems}
                     section={section}
                     onNavigate={handleNavigateItem}
+                    collapsed={!sidebarOpen}
+                    iconMap={iconMap}
                   />
                 );
               }
@@ -431,7 +633,14 @@ export function AppLayout(props: Props) {
                     key="shift-group"
                     label="Quản lý ca làm"
                     isOpen={shiftMenuOpen}
-                    onToggle={() => setShiftMenuOpenBase((v: boolean) => !v)}
+                    onToggle={() => {
+                      if (!sidebarOpen) {
+                        setSidebarOpen(true);
+                        setExclusiveOpen("shift", "open");
+                      } else {
+                        setExclusiveOpen("shift");
+                      }
+                    }}
                     isActive={isShiftSection}
                     controlId="shift-nav"
                     icon={
@@ -442,6 +651,8 @@ export function AppLayout(props: Props) {
                     items={shiftItems}
                     section={section}
                     onNavigate={handleNavigateItem}
+                    collapsed={!sidebarOpen}
+                    iconMap={iconMap}
                   />
                 );
               }
@@ -452,6 +663,8 @@ export function AppLayout(props: Props) {
                   label={item.label}
                   active={section === item.key}
                   onClick={() => handleNavigateItem(item.key)}
+                  icon={iconMap[item.key] || iconMap.overview}
+                  collapsed={!sidebarOpen}
                 />
               );
             })}
@@ -459,36 +672,40 @@ export function AppLayout(props: Props) {
 
           {/* User Section */}
           <div className="px-4 py-4 border-t border-slate-200 bg-slate-50">
-            <div className="flex items-center gap-3 mb-3">
+            <div className={`flex items-center ${sidebarOpen ? "gap-3 mb-3" : "justify-center mb-2"}`}>
               <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-semibold shadow-md text-sm">
                 {accountName.charAt(0).toUpperCase()}
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-slate-800 text-sm truncate">{accountName}</div>
-                <div className="text-xs text-slate-500">{roleKey || "N/A"}</div>
-              </div>
+              {sidebarOpen && (
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-slate-800 text-sm truncate">{accountName}</div>
+                  <div className="text-xs text-slate-500">{roleKey || "N/A"}</div>
+                </div>
+              )}
             </div>
 
-            <button
-              onClick={onLogout}
-              className="w-full px-3 py-2 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 transition-all duration-200 flex items-center justify-center gap-2 border border-red-200"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                />
-              </svg>
-              Đăng xuất
-            </button>
+            {sidebarOpen && (
+              <button
+                onClick={onLogout}
+                className="w-full px-3 py-2 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 transition-all duration-200 flex items-center justify-center gap-2 border border-red-200"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                  />
+                </svg>
+                Đăng xuất
+              </button>
+            )}
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${sidebarOpen ? "ml-72" : "ml-0"}`}>
+      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${sidebarOpen ? "ml-72" : "ml-16"}`}>
         <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between gap-4 shadow-sm">
           <div className={`transition-all duration-300 ml-12`}>
             <h1 className="text-lg font-bold text-slate-800">Quản trị nhân sự &amp; chấm công</h1>
@@ -517,8 +734,10 @@ function SidebarItem(props: {
   active: boolean;
   onClick: () => void;
   isSubItem?: boolean;
+  icon?: ReactNode;
+  collapsed?: boolean;
 }) {
-  const { label, active, onClick, isSubItem = false } = props;
+  const { label, active, onClick, isSubItem = false, icon, collapsed = false } = props;
 
   if (isSubItem) {
     return (
@@ -527,10 +746,11 @@ function SidebarItem(props: {
         className={`w-full text-left px-3 py-2 rounded-lg transition-all duration-200 text-sm ${
           active ? "bg-blue-600 text-white font-medium shadow-sm" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
         }`}
+        title={label}
       >
-        <span className="flex items-center gap-2">
-          <span className="text-xs">•</span>
-          <span>{label}</span>
+        <span className="flex items-center gap-2 min-w-0">
+          {icon ? <span className="text-xs">{icon}</span> : <span className="text-xs">•</span>}
+          {!collapsed && <span className="whitespace-normal wrap-break-word leading-5">{label}</span>}
         </span>
       </button>
     );
@@ -539,11 +759,13 @@ function SidebarItem(props: {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-4 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium ${
+      className={`w-full ${collapsed ? "justify-center px-0" : "justify-start px-4"} py-2.5 rounded-lg transition-all duration-200 text-sm font-medium flex items-center gap-2 ${
         active ? "bg-blue-600 text-white shadow-md" : "text-slate-700 hover:bg-slate-100"
       }`}
+      title={label}
     >
-      {label}
+      {icon && <span className="ml-1">{icon}</span>}
+      {!collapsed && <span className="whitespace-normal wrap-break-word leading-5">{label}</span>}
     </button>
   );
 }
@@ -558,46 +780,54 @@ function GroupBlock(props: {
   items: { key: DirectorSection; label: string }[];
   section: DirectorSection;
   onNavigate: (s: DirectorSection) => void;
+  collapsed?: boolean;
+  iconMap: Record<string, ReactNode>;
 }) {
-  const { label, isOpen, onToggle, isActive, controlId, icon, items, section, onNavigate } = props;
+  const { label, isOpen, onToggle, isActive, controlId, icon, items, section, onNavigate, collapsed = false, iconMap } = props;
 
   return (
     <div className="pt-1">
       <button
         onClick={onToggle}
-        className={`w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+        className={`w-full flex items-center ${collapsed ? "justify-center px-0" : "justify-between px-4"} py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
           isActive ? "bg-blue-600 text-white shadow-md" : "text-slate-700 hover:bg-slate-100"
         }`}
         aria-expanded={isOpen}
         aria-controls={controlId}
+        title={label}
       >
-        <div className="flex items-center gap-2.5">
+        <div className={`flex items-center ${collapsed ? "gap-0" : "gap-2.5"}`}>
           {icon}
-          <span>{label}</span>
+          {!collapsed && <span>{label}</span>}
         </div>
-        <svg
-          className={`w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        {!collapsed && (
+          <svg
+            className={`w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        )}
       </button>
 
-      <div id={controlId} className={`overflow-hidden transition-all duration-300 ${isOpen ? "max-h-80 mt-1.5" : "max-h-0"}`}>
-        <div className="space-y-1 pl-3 border-l-2 border-blue-200 ml-5">
-          {items.map((child) => (
-            <SidebarItem
-              key={child.key}
-              label={child.label}
-              active={section === child.key}
-              onClick={() => onNavigate(child.key)}
-              isSubItem
-            />
-          ))}
+      {!collapsed && (
+        <div id={controlId} className={`overflow-hidden transition-all duration-300 ${isOpen ? "max-h-80 mt-1.5" : "max-h-0"}`}>
+          <div className="space-y-1 pl-3 border-l-2 border-blue-200 ml-5">
+            {items.map((child) => (
+              <SidebarItem
+                key={child.key}
+                label={child.label}
+                active={section === child.key}
+                onClick={() => onNavigate(child.key)}
+                isSubItem
+                icon={iconMap[child.key] || iconMap.overview}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

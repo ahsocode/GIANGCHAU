@@ -48,11 +48,6 @@ const FALLBACK_NAV_ITEMS: NavItem[] = [
     path: "quan-ly-nhan-vien/danh-sach-nhan-vien",
   },
   {
-    key: "employeeInfo",
-    label: "Thông tin nhân viên",
-    path: "quan-ly-nhan-vien/thong-tin-nhan-vien",
-  },
-  {
     key: "employeeAccounts",
     label: "Quản lý tài khoản",
     path: "quan-ly-nhan-vien/quan-ly-tai-khoan",
@@ -89,6 +84,107 @@ const FALLBACK_NAV_ITEMS: NavItem[] = [
   { key: "roles", label: "Chức vụ", path: "quan-ly-chuc-vu/chuc-vu" },
 ];
 
+const ATTENDANCE_KEY_ALIASES = new Set([
+  "attendance",
+  "attendanceoverview",
+  "quan-ly-cham-cong",
+  "quan_ly_cham_cong",
+  "quan ly cham cong",
+  "attendance-management",
+  "attendance_management",
+]);
+
+const ATTENDANCE_GROUP_HINTS = new Set([
+  "attendance",
+  "cham-cong",
+  "cham cong",
+  "chamcong",
+  "quan-ly-cham-cong",
+  "quan ly cham cong",
+  "quan_ly_cham_cong",
+]);
+
+function canonicalSectionKey(key: DirectorSection): DirectorSection {
+  const lower = String(key || "").toLowerCase();
+  if (ATTENDANCE_KEY_ALIASES.has(lower)) return "attendanceOverview";
+  return key;
+}
+
+function normalizeNavItems(items: NavItem[]): NavItem[] {
+  const seen = new Set<string>();
+  return items
+    .filter((item) => String(item.key || "").toLowerCase() !== "employeeinfo")
+    .map((item) => {
+      const key = canonicalSectionKey(item.key);
+      const label = key === "attendanceOverview" ? "Tổng quan chấm công" : item.label;
+      return { ...item, key, label };
+    })
+    .filter((it) => {
+      const k = String(it.key || "").toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+}
+
+function normalizeRoleAccess(access: Record<string, DirectorSection[]> | undefined) {
+  if (!access || typeof access !== "object") return {};
+  const result: Record<string, DirectorSection[]> = {};
+  Object.entries(access).forEach(([role, sections]) => {
+    const seen = new Set<string>();
+    result[role] = (sections || [])
+      .map((s) => canonicalSectionKey(s))
+      .filter((s) => {
+        const k = String(s || "").toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+  });
+  return result;
+}
+
+function buildAttendanceKeys(items: NavItem[]): DirectorSection[] {
+  const keys = new Set<DirectorSection>();
+  const add = (k: DirectorSection) => keys.add(canonicalSectionKey(k));
+
+  items.forEach((item) => {
+    const key = canonicalSectionKey(item.key);
+    const group = String(item.group || "").toLowerCase();
+    const pathSegment = String(item.path || "").split("/")[0].toLowerCase();
+    const normalizedPath = pathSegment.replace(/_/g, "-");
+
+    const isAttendanceKey = key.toString().startsWith("attendance");
+    const isAttendanceGroup =
+      ATTENDANCE_GROUP_HINTS.has(group) ||
+      ATTENDANCE_GROUP_HINTS.has(pathSegment) ||
+      ATTENDANCE_GROUP_HINTS.has(normalizedPath);
+
+    if (isAttendanceKey || isAttendanceGroup) add(key);
+  });
+
+  if (!keys.size) {
+    FALLBACK_NAV_ITEMS.forEach((i) => {
+      const k = canonicalSectionKey(i.key);
+      if (k.toString().startsWith("attendance")) keys.add(k);
+    });
+  }
+
+  return Array.from(keys);
+}
+
+function expandAttendanceSections(
+  sections: DirectorSection[],
+  attendanceKeys: DirectorSection[],
+  allowSet: Set<DirectorSection>
+) {
+  const set = new Set<DirectorSection>(sections.map((s) => canonicalSectionKey(s)));
+  if (set.has("attendanceOverview")) {
+    attendanceKeys.forEach((k) => set.add(canonicalSectionKey(k)));
+  }
+  return Array.from(set).filter((s) => allowSet.has(s));
+}
+
 const ROLE_SECTIONS: Record<string, DirectorSection[]> = {
   ADMIN: [],
   DIRECTOR: [],
@@ -100,28 +196,40 @@ function resolveSections(
   custom?: string[],
   overrides?: Record<string, DirectorSection[]>,
   allKeys: DirectorSection[] = [],
-  navItems: NavItem[] = []
+  navItems: NavItem[] = [],
+  attendanceKeys: DirectorSection[] = []
 ): DirectorSection[] {
   const upper = (roleKey || "").toUpperCase();
-  if (upper === "ADMIN" || upper === "DIRECTOR") return allKeys;
+  if (upper === "ADMIN" || upper === "DIRECTOR") {
+    return expandAttendanceSections(allKeys, attendanceKeys, new Set(allKeys));
+  }
 
-  const lowerToKey = new Map(navItems.map((n) => [String(n.key).toLowerCase(), n.key]));
+  const lowerToKey = new Map(navItems.map((n) => [String(n.key).toLowerCase(), canonicalSectionKey(n.key)]));
+  ATTENDANCE_KEY_ALIASES.forEach((alias) => lowerToKey.set(alias, "attendanceOverview"));
+
   const cleanedCustom = (custom || [])
-    .map((k) => lowerToKey.get(String(k || "").toLowerCase()))
+    .map((k) => {
+      const canonical = canonicalSectionKey(k as DirectorSection);
+      return lowerToKey.get(String(canonical || "").toLowerCase());
+    })
     .filter(Boolean) as DirectorSection[];
   if (cleanedCustom.length) {
-    return cleanedCustom;
+    return expandAttendanceSections(cleanedCustom, attendanceKeys, new Set(allKeys));
   }
 
   const override = overrides?.[upper];
   if (override && override.length) {
-    return sanitizeRoleSections(upper, override, allKeys);
+    const sanitized = sanitizeRoleSections(upper, override, allKeys);
+    return expandAttendanceSections(sanitized, attendanceKeys, new Set(allKeys));
   }
 
   const defaults = ROLE_SECTIONS[upper];
-  if (defaults && defaults.length) return sanitizeRoleSections(upper, defaults, allKeys);
+  if (defaults && defaults.length) {
+    const sanitized = sanitizeRoleSections(upper, defaults, allKeys);
+    return expandAttendanceSections(sanitized, attendanceKeys, new Set(allKeys));
+  }
 
-  return [];
+  return expandAttendanceSections([], attendanceKeys, new Set(allKeys));
 }
 
 export type AppShellRenderProps = {
@@ -162,7 +270,7 @@ export function AppShell(props: {
   const [accountSections, setAccountSections] = useState<string[] | undefined>(undefined);
   const [roleOverrides, setRoleOverrides] = useState<Record<string, DirectorSection[]>>({});
   const [allowedSections, setAllowedSections] = useState<DirectorSection[]>([]);
-  const [navItems, setNavItems] = useState<NavItem[]>(FALLBACK_NAV_ITEMS);
+  const [navItems, setNavItems] = useState<NavItem[]>(normalizeNavItems(FALLBACK_NAV_ITEMS));
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -187,10 +295,8 @@ export function AppShell(props: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const allSectionKeys = useMemo(
-    () => navItems.map((i) => i.key),
-    [navItems]
-  );
+  const allSectionKeys = useMemo(() => navItems.map((i) => canonicalSectionKey(i.key)), [navItems]);
+  const attendanceSectionKeys = useMemo(() => buildAttendanceKeys(navItems), [navItems]);
 
   function applyWorkConfigs(cfgs: WorkConfigRecord[]) {
     setWorkConfigs(cfgs);
@@ -247,14 +353,16 @@ export function AppShell(props: {
           ? acc.permissions
           : undefined;
       setAccountSections(customSections);
-      setAllowedSections(resolveSections(resolvedRole, customSections, roleOverrides, allSectionKeys, navItems));
+      setAllowedSections(
+        resolveSections(resolvedRole, customSections, roleOverrides, allSectionKeys, navItems, attendanceSectionKeys)
+      );
     } catch {
       setAccountName("Người dùng");
       setRoleKey("DIRECTOR");
       setAccountSections(undefined);
-      setAllowedSections(resolveSections("DIRECTOR", undefined, roleOverrides, allSectionKeys, navItems));
+      setAllowedSections(resolveSections("DIRECTOR", undefined, roleOverrides, allSectionKeys, navItems, attendanceSectionKeys));
     }
-  }, [router, roleOverrides, navItems, allSectionKeys]);
+  }, [router, roleOverrides, navItems, allSectionKeys, attendanceSectionKeys]);
 
   useEffect(() => {
     async function loadRoleAccess() {
@@ -263,31 +371,32 @@ export function AppShell(props: {
         if (!res.ok) throw new Error("Không tải được cấu hình phân quyền");
         const data = await res.json();
         if (Array.isArray(data?.sections) && data.sections.length) {
-          setNavItems(
-            data.sections.map((s: NavItem) => ({
-              key: s.key,
-              label: s.label,
-              path: String(s.path || "").replace(/^\//, ""),
-              group: s.group ?? null,
-            }))
-          );
+          const normalized = data.sections.map((s: NavItem) => ({
+            key: s.key,
+            label: s.label,
+            path: String(s.path || "").replace(/^\//, ""),
+            group: s.group ?? null,
+          }));
+          setNavItems(normalizeNavItems(normalized));
         }
         if (data?.roleAccess) {
-          setRoleOverrides(data.roleAccess);
+          setRoleOverrides(normalizeRoleAccess(data.roleAccess));
         }
       } catch (err) {
         console.warn("Không tải được roleAccess từ API, dùng fallback localStorage.", err);
-        setNavItems(FALLBACK_NAV_ITEMS);
+        setNavItems(normalizeNavItems(FALLBACK_NAV_ITEMS));
       }
-      setRoleOverrides((prev) => Object.keys(prev).length ? prev : loadRolePermissions());
+      setRoleOverrides((prev) => (Object.keys(prev).length ? prev : normalizeRoleAccess(loadRolePermissions())));
     }
 
     loadRoleAccess();
   }, []);
 
   useEffect(() => {
-    setAllowedSections(resolveSections(roleKey, accountSections, roleOverrides, allSectionKeys, navItems));
-  }, [roleKey, accountSections, roleOverrides, allSectionKeys, navItems]);
+    setAllowedSections(
+      resolveSections(roleKey, accountSections, roleOverrides, allSectionKeys, navItems, attendanceSectionKeys)
+    );
+  }, [roleKey, accountSections, roleOverrides, allSectionKeys, navItems, attendanceSectionKeys]);
 
   // Load data
   useEffect(() => {

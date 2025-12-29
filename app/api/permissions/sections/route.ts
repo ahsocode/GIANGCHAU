@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { DirectorSection } from "@/app/types";
+import { DEFAULT_ROLE_SECTIONS } from "@/lib/role-permissions";
 import { prisma, isPrismaEnabled } from "@/lib/prisma/client";
 
 // Prisma client có thể chưa sinh model appSection trên môi trường build hiện tại,
@@ -9,6 +10,32 @@ const db: any = prisma;
 
 const LOCKED_ROLES = new Set(["ADMIN", "DIRECTOR"]);
 const ALLOWED_ACTIONS = new Set(["VIEW", "CREATE", "UPDATE", "DELETE", "MANAGE"]);
+const FALLBACK_SECTIONS: { key: DirectorSection; label: string; path: string; group?: string | null }[] = [
+  { key: "overview", label: "Tổng quan", path: "tong-quan" },
+  { key: "departments", label: "Quản lý bộ phận", path: "quan-ly-bo-phan" },
+  { key: "employeesOverview", label: "Tổng quan nhân viên", path: "quan-ly-nhan-vien/tong-quan-nhan-vien" },
+  { key: "employees", label: "Danh sách nhân viên", path: "quan-ly-nhan-vien/danh-sach-nhan-vien" },
+  { key: "employeeAccounts", label: "Quản lý tài khoản", path: "quan-ly-nhan-vien/quan-ly-tai-khoan" },
+  { key: "attendanceOverview", label: "Tổng quan chấm công", path: "quan-ly-cham-cong" },
+  { key: "attendanceDailyReport", label: "Báo cáo chấm công theo ngày", path: "quan-ly-cham-cong/bao-cao-ngay" },
+  { key: "attendanceWeeklyReport", label: "Báo cáo chấm công theo tuần", path: "quan-ly-cham-cong/bao-cao-tuan" },
+  { key: "attendanceMonthlyReport", label: "Báo cáo chấm công theo tháng", path: "quan-ly-cham-cong/bao-cao-thang" },
+  { key: "attendanceEdit", label: "Chỉnh sửa chấm công", path: "quan-ly-cham-cong/chinh-sua" },
+  { key: "shiftOverview", label: "Tổng quan ca làm", path: "quan-ly-ca-lam/tong-quan-ca-lam" },
+  { key: "shifts", label: "Ca làm", path: "quan-ly-ca-lam/ca-lam" },
+  { key: "shiftAssignment", label: "Phân ca", path: "quan-ly-ca-lam/phan-ca" },
+  { key: "permissions", label: "Phân quyền", path: "quan-ly-chuc-vu/phan-quyen" },
+  { key: "roles", label: "Chức vụ", path: "quan-ly-chuc-vu/chuc-vu" },
+];
+const FALLBACK_ROLES = [
+  { key: "ADMIN", name: "Admin", isDirector: true },
+  { key: "DIRECTOR", name: "Giám đốc", isDirector: true },
+  { key: "MANAGER", name: "Trưởng phòng", isDirector: false },
+  { key: "ACCOUNTANT", name: "Kế toán", isDirector: false },
+  { key: "SUPERVISOR", name: "Giám sát", isDirector: false },
+  { key: "EMPLOYEE", name: "Nhân viên", isDirector: false },
+  { key: "TEMPORARY", name: "Thời vụ", isDirector: false },
+];
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -18,52 +45,71 @@ function unauthorized(message: string) {
   return NextResponse.json({ error: message }, { status: 403 });
 }
 
+function buildFallbackPayload(reason: string) {
+  const allKeys = FALLBACK_SECTIONS.map((s) => s.key as DirectorSection);
+  const roleAccess: Record<string, DirectorSection[]> = {
+    ...DEFAULT_ROLE_SECTIONS,
+    ADMIN: allKeys,
+    DIRECTOR: allKeys,
+  };
+
+  return {
+    sections: FALLBACK_SECTIONS,
+    roles: FALLBACK_ROLES,
+    roleAccess,
+    source: "fallback",
+    reason,
+  };
+}
+
 export async function GET() {
   if (!isPrismaEnabled()) {
-    return NextResponse.json(
-      { error: "Prisma chưa được cấu hình" },
-      { status: 500 }
-    );
+    return NextResponse.json(buildFallbackPayload("Prisma is not configured"));
   }
 
-  const [sections, roles, access] = await Promise.all([
-    db.appSection.findMany({
-      where: { isEnabled: true },
-      orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
-    }),
-    db.role.findMany({
-      select: { key: true, name: true, isDirector: true },
-      orderBy: { id: "asc" },
-    }),
-    db.roleSectionAccess.findMany({
-      include: { role: true, section: true },
-    }),
-  ]);
+  try {
+    const [sections, roles, access] = await Promise.all([
+      db.appSection.findMany({
+        where: { isEnabled: true },
+        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+      }),
+      db.role.findMany({
+        select: { key: true, name: true, isDirector: true },
+        orderBy: { id: "asc" },
+      }),
+      db.roleSectionAccess.findMany({
+        include: { role: true, section: true },
+      }),
+    ]);
 
-  const allKeys = sections.map((s: { key: string }) => s.key as DirectorSection);
-  const roleAccess: Record<string, DirectorSection[]> = {};
+    const allKeys = sections.map((s: { key: string }) => s.key as DirectorSection);
+    const roleAccess: Record<string, DirectorSection[]> = {};
 
-  roles.forEach((r: { key?: string | null }) => {
-    const upper = (r.key || "").toUpperCase();
-    if (LOCKED_ROLES.has(upper)) {
-      roleAccess[upper] = allKeys;
-    }
-  });
+    roles.forEach((r: { key?: string | null }) => {
+      const upper = (r.key || "").toUpperCase();
+      if (LOCKED_ROLES.has(upper)) {
+        roleAccess[upper] = allKeys;
+      }
+    });
 
-  access.forEach((a: { role?: { key?: string | null }; section?: { key?: string | null } }) => {
-    const key = (a.role?.key || "").toUpperCase();
-    if (!key || LOCKED_ROLES.has(key)) return;
-    const sectionKey = a.section?.key as DirectorSection | undefined;
-    if (!sectionKey) return;
-    if (!roleAccess[key]) roleAccess[key] = [];
-    roleAccess[key].push(sectionKey);
-  });
+    access.forEach((a: { role?: { key?: string | null }; section?: { key?: string | null } }) => {
+      const key = (a.role?.key || "").toUpperCase();
+      if (!key || LOCKED_ROLES.has(key)) return;
+      const sectionKey = a.section?.key as DirectorSection | undefined;
+      if (!sectionKey) return;
+      if (!roleAccess[key]) roleAccess[key] = [];
+      roleAccess[key].push(sectionKey);
+    });
 
-  return NextResponse.json({
-    sections,
-    roles,
-    roleAccess,
-  });
+    return NextResponse.json({
+      sections,
+      roles,
+      roleAccess,
+    });
+  } catch (err) {
+    console.error("Failed to load permissions sections", err);
+    return NextResponse.json(buildFallbackPayload("Database unavailable"));
+  }
 }
 
 export async function PUT(req: Request) {

@@ -45,13 +45,8 @@ export function AppLayout(props: Props) {
   };
 
   const [now, setNow] = useState<string>("");
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    const stored = localStorage.getItem("sidebarOpen");
-    if (stored === "false") return false;
-    if (stored === "true") return true;
-    return true;
-  });
+  // Keep initial render deterministic for SSR; hydrate actual preference on mount.
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
 
   // ---------- Keys sets ----------
   const attendanceKeyBase = useMemo(
@@ -158,6 +153,16 @@ export function AppLayout(props: Props) {
   useEffect(() => {
     const timer = setInterval(() => setNow(formatNow()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = localStorage.getItem("sidebarOpen");
+    const frame = requestAnimationFrame(() => {
+      if (stored === "false") setSidebarOpen(false);
+      else if (stored === "true") setSidebarOpen(true);
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {

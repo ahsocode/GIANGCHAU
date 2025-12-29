@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppShell } from "@/component/layout/AppShell";
 import type { Employee } from "@/lib/hr-types";
@@ -25,11 +25,41 @@ function EmployeeDetail({
   const router = useRouter();
   const slug = (params?.slug as string) || "";
   const codeParam = decodeURIComponent((params?.code as string) || "").toLowerCase();
+  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const employee = useMemo(
-    () => employees.find((e) => (e.code || "").toLowerCase() === codeParam),
-    [employees, codeParam]
-  );
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/employees/${encodeURIComponent(codeParam)}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Không tải được thông tin nhân viên");
+        }
+        const data = await res.json();
+        if (!cancelled) setEmployee(data);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Không tải được thông tin nhân viên";
+        const fallback = employees.find((e) => (e.code || "").toLowerCase() === codeParam) || null;
+        if (!cancelled) {
+          setEmployee(fallback);
+          setError(fallback ? "Hiển thị dữ liệu tạm từ bộ nhớ cục bộ." : message);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [codeParam, employees]);
 
   const shiftLabel = useMemo(() => {
     if (!employee?.shiftCode) return "-";
@@ -42,6 +72,10 @@ function EmployeeDetail({
     const target = slug ? `/${slug}/quan-ly-nhan-vien/danh-sach-nhan-vien` : "/quan-ly-nhan-vien/danh-sach-nhan-vien";
     router.push(target);
   };
+
+  if (loading) {
+    return <div className="text-sm text-slate-600">Đang tải thông tin nhân viên...</div>;
+  }
 
   if (!employee) {
     return (
@@ -61,6 +95,11 @@ function EmployeeDetail({
 
   return (
     <div className="space-y-5">
+      {error && (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded">
+          {error}
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <p className="text-xs text-slate-500">Thông tin nhân viên</p>

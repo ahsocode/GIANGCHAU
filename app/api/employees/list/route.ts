@@ -58,17 +58,10 @@ function mapAccount(acc: PrismaAccount) {
     name: acc.fullName,
     roleKey,
     roleName,
-    phone: acc.phone || "",
-    email: acc.email || "",
-    cccd: acc.detail?.cccd || "",
-    bhxh: acc.detail?.bhxh || "",
     employmentType,
-    workStatus,
-    workStatusLabel: workStatus === "ACTIVE" ? "Đang làm" : "Đã nghỉ",
-    startDate: acc.detail?.startDate || "",
     department: acc.detail?.department || "",
     shiftCode: acc.detail?.shiftCode || null,
-  };
+  } as const;
 }
 
 function buildQuery(searchParams: URLSearchParams) {
@@ -121,7 +114,20 @@ async function loadEmployees(searchParams: URLSearchParams) {
     try {
       const items = await prisma.account.findMany({
         where,
-        include: { detail: true },
+        select: {
+          id: true,
+          employeeCode: true,
+          fullName: true,
+          roleKey: true,
+          detail: {
+            select: {
+              position: true,
+              employmentType: true,
+              department: true,
+              shiftCode: true,
+            },
+          },
+        },
         orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -130,24 +136,12 @@ async function loadEmployees(searchParams: URLSearchParams) {
 
       if (items.length) {
         const mapped = items.map(mapAccount);
-        const hasDetail = mapped.some(
-          (m) =>
-            m.department ||
-            m.shiftCode ||
-            m.cccd ||
-            m.bhxh ||
-            m.startDate
-        );
-
-        if (hasDetail || !isSupabaseEnabled()) {
-          return {
-            page,
-            pageSize,
-            total,
-            items: mapped,
-          };
-        }
-        // thiếu detail → tiếp tục thử Supabase
+        return {
+          page,
+          pageSize,
+          total,
+          items: mapped,
+        };
       }
     } catch (err) {
       console.warn("Prisma employees query failed, will try Supabase fallback:", err);
@@ -167,7 +161,16 @@ async function loadEmployees(searchParams: URLSearchParams) {
             : true
         )
         .filter((e) => (department ? (e.department || "") === department : true))
-        .filter((e) => (shiftCode ? (e.shiftCode || "") === shiftCode : true));
+        .filter((e) => (shiftCode ? (e.shiftCode || "") === shiftCode : true))
+        .map((e) => ({
+          code: e.code,
+          name: e.name,
+          roleKey: (e.roleKey || "").toUpperCase(),
+          roleName: e.roleName,
+          employmentType: e.employmentType || "FULL_TIME",
+          department: e.department || "",
+          shiftCode: e.shiftCode || null,
+        }));
       const total = filtered.length;
       const start = (page - 1) * pageSize;
       const items = filtered.slice(start, start + pageSize);

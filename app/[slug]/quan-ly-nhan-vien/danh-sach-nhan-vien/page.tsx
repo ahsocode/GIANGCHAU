@@ -302,13 +302,13 @@ function EmployeesSection({
             <table className="min-w-full text-xs">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
+                  <th className="px-3 py-2 text-left font-medium w-12">STT</th>
                   <th className="px-3 py-2 text-left font-medium">Mã NV</th>
                   <th className="px-3 py-2 text-left font-medium">Họ và tên</th>
                   <th className="px-3 py-2 text-left font-medium">Chức vụ</th>
                   <th className="px-3 py-2 text-left font-medium">Loại</th>
                   <th className="px-3 py-2 text-left font-medium">Bộ phận</th>
                   <th className="px-3 py-2 text-left font-medium">Ca làm</th>
-                  <th className="px-3 py-2 text-left font-medium">Trạng thái làm việc</th>
                   <th className="px-3 py-2 text-left font-medium">Thao tác</th>
                 </tr>
               </thead>
@@ -328,8 +328,9 @@ function EmployeesSection({
                   </tr>
                 )}
 
-                {data.map((e) => (
+                {data.map((e, idx) => (
                   <tr key={e.code} className="border-t border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2">{(page - 1) * pageSize + idx + 1}</td>
                     <td className="px-3 py-2">{e.code}</td>
                     <td className="px-3 py-2">{e.name}</td>
                     <td className="px-3 py-2">{e.roleName || e.roleKey || "-"}</td>
@@ -338,9 +339,6 @@ function EmployeesSection({
                     </td>
                     <td className="px-3 py-2">{e.department}</td>
                     <td className="px-3 py-2">{getShiftLabel(e)}</td>
-                    <td className="px-3 py-2">
-                      {e.workStatusLabel || (e.workStatus === "ACTIVE" ? "Đang làm" : "Đã nghỉ")}
-                    </td>
                     <td className="px-3 py-2">
                       <button
                         className="px-3 py-1 rounded-md text-[11px] font-medium bg-blue-600 text-white hover:bg-blue-500 transition"

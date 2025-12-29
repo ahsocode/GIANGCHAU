@@ -68,6 +68,10 @@ export async function GET() {
   }
 
   try {
+    if (!db?.appSection || !db?.role || !db?.roleSectionAccess) {
+      return NextResponse.json(buildFallbackPayload("Prisma client missing models"));
+    }
+
     const [sections, roles, access] = await Promise.all([
       db.appSection.findMany({
         where: { isEnabled: true },

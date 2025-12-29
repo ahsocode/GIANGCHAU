@@ -51,7 +51,6 @@ function mapAccount(acc: PrismaAccount) {
     acc.roleKey;
 
   const employmentType = acc.detail?.employmentType || "FULL_TIME";
-  const workStatus = acc.detail?.workStatus || "ACTIVE";
 
   return {
     code: acc.employeeCode || acc.id,
